@@ -1,0 +1,19 @@
+{
+  "name": "@viesma/simulation",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm --workspace-root run test packages/simulation/test/",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@viesma/domain": "workspace:*"
+  }
+}

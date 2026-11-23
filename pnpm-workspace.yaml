@@ -1,0 +1,20 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+strictPeerDependencies: true
+
+allowBuilds:
+  msgpackr-extract: false
+
+packageExtensions:
+  '@colyseus/core@0.18.29':
+    dependencies:
+      '@types/debug': 4.1.13
+
+catalogs:
+  persistence:
+    '@types/pg': 8.23.1
+    drizzle-kit: 0.31.11
+    drizzle-orm: 0.45.4
+    pg: 8.23.1
