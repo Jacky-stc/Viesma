@@ -107,5 +107,5 @@ test('rejects invalid clocks, variable dt and skipped ticks', () => {
   const context = { tick: toSimulationTick(1), rng: createSeededRng(0), ids: { nextAttackId: () => 'attack-1' } }
   expect(() => step(state, [], 1 / 15, context)).toThrow(/fixed delta/)
   expect(() => step(state, [], 1 / 30, { ...context, tick: toSimulationTick(2) })).toThrow(/next tick/)
-  expect(() => step(state, [{ kind: 'input' }], 1 / 30, context)).toThrow(/does not accept commands/)
+  expect(step(state, [{ kind: 'input' }], 1 / 30, context)).toEqual({ state: { ...state, tick: 1 }, events: [] })
 })

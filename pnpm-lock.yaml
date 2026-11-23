@@ -49,6 +49,24 @@ importers:
       '@colyseus/sdk':
         specifier: 0.18.10
         version: 0.18.10(@colyseus/core@0.18.29)(typescript@6.0.3)
+      '@viesma/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@viesma/game-data':
+        specifier: workspace:*
+        version: link:../../packages/game-data
+      '@viesma/network-colyseus':
+        specifier: workspace:*
+        version: link:../../packages/network-colyseus
+      '@viesma/physics':
+        specifier: workspace:*
+        version: link:../../packages/physics
+      '@viesma/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@viesma/simulation':
+        specifier: workspace:*
+        version: link:../../packages/simulation
       pixi.js:
         specifier: 8.23.0
         version: 8.23.0
@@ -86,10 +104,28 @@ importers:
       '@colyseus/ws-transport':
         specifier: 0.18.5
         version: 0.18.5(@colyseus/core@0.18.29)(express@5.3.0)
+      '@viesma/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@viesma/game-data':
+        specifier: workspace:*
+        version: link:../../packages/game-data
+      '@viesma/network-colyseus':
+        specifier: workspace:*
+        version: link:../../packages/network-colyseus
+      '@viesma/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@viesma/simulation':
+        specifier: workspace:*
+        version: link:../../packages/simulation
       express:
         specifier: 5.3.0
         version: 5.3.0
     devDependencies:
+      '@colyseus/sdk':
+        specifier: 0.18.10
+        version: 0.18.10(@colyseus/core@0.18.29)(typescript@6.0.3)
       '@types/express':
         specifier: 5.0.6
         version: 5.0.6
@@ -99,8 +135,20 @@ importers:
 
   packages/domain: {}
 
+  packages/game-data:
+    dependencies:
+      '@viesma/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@viesma/physics':
+        specifier: workspace:*
+        version: link:../physics
+
   packages/network-colyseus:
     dependencies:
+      '@colyseus/schema':
+        specifier: 5.0.50
+        version: 5.0.50(typescript@6.0.3)
       '@viesma/domain':
         specifier: workspace:*
         version: link:../domain
@@ -125,6 +173,12 @@ importers:
       '@viesma/domain':
         specifier: workspace:*
         version: link:../domain
+      '@viesma/game-data':
+        specifier: workspace:*
+        version: link:../game-data
+      '@viesma/physics':
+        specifier: workspace:*
+        version: link:../physics
 
 packages:
 

@@ -1,0 +1,169 @@
+{
+  "type": "map",
+  "version": "1.10",
+  "tiledversion": "1.12.2",
+  "orientation": "orthogonal",
+  "infinite": false,
+  "renderorder": "right-down",
+  "width": 8,
+  "height": 5,
+  "tilewidth": 32,
+  "tileheight": 32,
+  "properties": [
+    {
+      "name": "mapId",
+      "type": "string",
+      "value": "fixture_hub"
+    }
+  ],
+  "tilesets": [
+    {
+      "firstgid": 1,
+      "source": "swatches.tsj"
+    }
+  ],
+  "layers": [
+    {
+      "type": "tilelayer",
+      "id": 1,
+      "name": "Terrain",
+      "x": 0,
+      "y": 0,
+      "opacity": 1,
+      "visible": true,
+      "width": 8,
+      "height": 5,
+      "data": [
+        2147483649, 1073741826, 536870913, 4026531842, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0
+      ]
+    },
+    {
+      "type": "objectgroup",
+      "id": 2,
+      "name": "Gameplay",
+      "x": 0,
+      "y": 0,
+      "opacity": 1,
+      "visible": true,
+      "draworder": "topdown",
+      "objects": [
+        {
+          "id": 1,
+          "type": "SolidRect",
+          "name": "floor",
+          "x": 0,
+          "y": 128,
+          "width": 256,
+          "height": 32,
+          "rotation": 0,
+          "visible": true
+        },
+        {
+          "id": 2,
+          "type": "OneWayPlatform",
+          "name": "ledge",
+          "x": 96,
+          "y": 96,
+          "width": 64,
+          "height": 6,
+          "rotation": 0,
+          "visible": true
+        },
+        {
+          "id": 3,
+          "type": "PlayerSpawn",
+          "name": "",
+          "x": 40.5,
+          "y": 128,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true,
+          "point": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_respawn"
+            },
+            {
+              "name": "facing",
+              "type": "string",
+              "value": "right"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "PlayerSpawn",
+          "name": "",
+          "x": 178,
+          "y": 128,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true,
+          "point": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_from_fixture_field"
+            },
+            {
+              "name": "facing",
+              "type": "string",
+              "value": "right"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "type": "Portal",
+          "name": "",
+          "x": 216,
+          "y": 80,
+          "width": 32,
+          "height": 48,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "portalId",
+              "type": "string",
+              "value": "p_to_fixture_field"
+            },
+            {
+              "name": "destinationMapId",
+              "type": "string",
+              "value": "fixture_field"
+            },
+            {
+              "name": "destinationSpawnId",
+              "type": "string",
+              "value": "spawn_from_fixture_hub"
+            },
+            {
+              "name": "reversePortalId",
+              "type": "string",
+              "value": "p_to_fixture_hub"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "type": "Npc",
+          "name": "npc_guide",
+          "x": 72,
+          "y": 128,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true,
+          "point": true
+        }
+      ]
+    }
+  ]
+}

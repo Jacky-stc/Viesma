@@ -58,14 +58,14 @@ MVP-A 可使用 early multiplayer adapter 進行開發展示，但不以真實�
 
 ### Desktop
 
-- 支援 keyboard：ArrowLeft／A、ArrowRight／D、Space jump、J attack、E interact／portal、F pickup、I inventory、P party、K AP；1／2 使用指定 HP／MP 藥水。鍵位設定保留未來擴充點，MVP 不做自訂鍵位 UI。
-- UI focus、dialogue 或文字輸入時不觸發遊戲操作；blur／visibility change 送出 neutral input，避免卡鍵。
+- 支援鍵盤左右方向鍵／A、D 移動，↑／W 進入傳送門，Space 跳躍，J 攻擊，E 互動，F 拾取，I 物品欄，P 隊伍，K 能力點數，1／2 使用指定 HP／MP 藥水。鍵位設定保留未來擴充點，MVP 不做自訂鍵位 UI。
+- 遊戲快捷鍵只在遊戲場景取得焦點時生效。焦點移至對話控制項、其他 UI 或文字欄位時清除遊戲輸入，失焦和切到背景也會回到中立。Guide 對話開著時可在場景繼續移動，離開互動範圍會關閉對話。
 - 參考 viewport 為 1280 × 720 CSS pixels；較小 desktop 至 960 × 540 可操作；UI 透過 scale／reflow 保持可讀。
 
 ### Mobile
 
 - Landscape 主要遊玩，最低參考 viewport 667 × 375 CSS pixels。Portrait 顯示旋轉提示並停止本機 input；server 世界持續運作，不把 orientation lock 或 fullscreen 當必要條件。
-- 左側方向控制，右側 jump、attack、interact／pickup、HP／MP 藥水；inventory、party、AP 使用可觸控面板，按鈕 touch target 至少 2.75rem。
+- 左側方向控制含 ↑ 傳送，右側提供 jump、attack、interact／pickup 和 HP／MP 藥水。Inventory、party、AP 使用可觸控面板，按鈕 touch target 至少 2.75rem。
 - 支援左右移動＋jump／attack 多指同時操作；處理 `pointercancel`、gesture、safe-area、browser toolbar 變動與 app 切換。
 - DOM UI 使用 `rem` 與 safe-area；Pixi scene 自行處理 logical viewport、camera、DPR 上限 2 與 resize。世界 physics 不受 CSS scale 或 refresh rate 影響。
 - 支援 WebGL 的 browser 為基線；WebGPU 非必要。不能建立 renderer 時顯示明確支援訊息。

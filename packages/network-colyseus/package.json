@@ -13,6 +13,7 @@
     "build": "tsc"
   },
   "dependencies": {
+    "@colyseus/schema": "5.0.50",
     "@viesma/domain": "workspace:*",
     "@viesma/protocol": "workspace:*"
   }

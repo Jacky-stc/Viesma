@@ -1,0 +1,14 @@
+{
+  "type": "map",
+  "version": "1.10",
+  "tiledversion": "1.12.2",
+  "orientation": "isometric",
+  "infinite": false,
+  "width": 8,
+  "height": 5,
+  "tilewidth": 32,
+  "tileheight": 32,
+  "layers": [],
+  "tilesets": [],
+  "properties": [{ "name": "mapId", "type": "string", "value": "fixture_hub" }]
+}

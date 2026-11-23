@@ -1,0 +1,15 @@
+{
+  "type": "tileset",
+  "version": "1.10",
+  "tiledversion": "1.12.2",
+  "name": "Swatches",
+  "image": "swatches.png",
+  "imagewidth": 64,
+  "imageheight": 32,
+  "tilewidth": 32,
+  "tileheight": 32,
+  "columns": 2,
+  "tilecount": 3,
+  "margin": 0,
+  "spacing": 0
+}

@@ -41,9 +41,12 @@ graph LR
 | `village/p_to_m3` → `m3/spawn_from_village` | `m3/p_to_village` → `village/spawn_from_m3` |
 | `village/p_to_m4` → `m4/spawn_from_village` | `m4/p_to_village` → `village/spawn_from_m4` |
 
-- Portal 是 server 驗證的 interact command，角色須 alive、grounded、與 trigger overlap，且不在 Attack／Hurt／transfer。不能由 client 指定任意 map／coordinate。
-- Portal cooldown 30 ticks；成功 transfer 清除 input history、velocity 與 action，增加 `mapEpoch`。Spawn 在 trigger 外，不會自動 bounce 回去。
-- Server 先保留 destination seat，再移出來源。失敗／滿房維持來源角色與位置，不消耗物品或進度；詳見 transfer state machine。
+Village 的傳送門由西向東依序通往 M3、M1、M2、M4。走訪 M5 需經 M1 的單向橋面，走訪 M6 需跑過 M2 的平地。 [七圖地形及來源](TILED_MAPS.md#七圖-graybox)
+
+- 角色站在 portal 觸發區內時，按下 ↑／W 或橫向觸控 ↑ 才會啟動傳送。單純進入觸發區會留在原圖。鍵盤和觸控的 Up 合併為一個動作，須放開所有來源再按下，才會有下一次啟動邊緣。
+- Authority 以角色 AABB 與來源 portal 的正面積交疊判定資格。角色須存活、接地，且未處於 Attack、Hurt 或傳送中。目的地和生成點由匯入資料決定。
+- 成功傳送保留角色身分與 HP／MP，清除移動意圖、速度與動作，將角色放到指定朝向的目的地生成點，並增加 `mapEpoch`。生成點位於所有觸發區外。放開再按且符合資格時即可再次傳送。
+- M2.2 本地傳送在一個 tick 更新角色和地圖，目的地驗證失敗時依原地圖繼續模擬。多人房間由 server 先保留 destination seat，再移出來源。 [架構契約](ARCHITECTURE.md#6-map-authoringroom-與-transfer)
 - Spawn 須在 map bounds、有 solid／one-way 支撐、完整角色 headroom、非 hazard／portal trigger。實際座標由 M2.1 authoring 決定，validator 為 release 必要條件。
 - 進入戰鬥圖／respawn 有 90 ticks protection；被保護者不能受傷，主動 attack 立即取消保護。Village 永遠不能受傷。
 - 初次進圖優先 party leader 的同 map instance；滿則使用該 map 最早建立且有位子的 instance，皆滿則在 node limits 內建立。MVP 無手動 channel browser；若隊友分開，party UI 顯示 map／instance，之後經 portal 可重試靠攏。
@@ -61,7 +64,7 @@ graph LR
 | Jump buffer／coyote time | 各 3 ticks，約 100ms；同一跳躍只 consume 一次 edge |
 | Air control | 水平 acceleration 同地面；無 double jump、無 drop-through |
 
-Physics 固定順序為水平加速 → gravity → swept horizontal collision → swept vertical collision → grounded／action state → 座標量化。One-way 只在向下且前一 tick 底部不低於平台頂部時碰撞；角色／怪物彼此不造成 solid collision。用固定資料順序、相同公式與 tick-end 1/1024 world unit 量化降低 prediction drift；仍以 server correction 為準，不承諾跨版本 bit-identical physics。
+Physics 固定順序為水平速度更新 → gravity → swept horizontal collision → swept vertical collision → grounded／action state。兩軸掃掠均使用 1/1024 world unit 格線上的目標座標，tick 結束時儲存量化後的位置。One-way 只在向下且前一 tick 腳底位於平台頂面或更高時碰撞。角色與怪物可彼此穿過。以固定資料順序及相同公式降低 prediction drift，連線時以 server correction 為準。角點、座標與速度上限見 [平台碰撞契約](ARCHITECTURE.md#41-m11-平台碰撞契約)。
 
 ### 2.1 狀態機
 
@@ -73,7 +76,13 @@ Physics 固定順序為水平加速 → gravity → swept horizontal collision �
 - **Hurt**：受有效傷害後 6 ticks，取消尚未出手的攻擊；MVP 不做 knockback，Hurt 期間不能新 attack／jump。
 - **Death**：HP ≤0，清除 input／attack／aggro target，不能移動、拾取、分 AP 或換裝；3 秒後自動 Village respawn。
 
-World void plane 在 `mapHeight + 64`，墜落直接死亡。Village authoring 不應有可達 void；若發生則同樣 respawn。
+### 2.2 移動輸入與跳躍時序
+
+- 向左、向右各自將水平速度朝對應跑速推進，並更新朝向。地面放開輸入時減速至靜止，空中放開輸入時維持水平慣性。左右同按等同中立並保留朝向。Idle／Run 依碰撞後的速度決定，因此煞停前仍為 Run。邊緣失去支撐當 tick 進入 Fall，落地當 tick 依水平速度切到 Idle 或 Run。
+- Jump edge 在按下當 tick 嘗試跳躍。若當下無支撐且已超過 coyote 視窗，仍可在接下來 3 ticks 的任一 tick 開始時有支撐便起跳。地面行走失去支撐後的下一 tick 是 coyote 視窗的第 1 tick，第 3 tick 仍可跳。主動起跳立即消耗 edge 與 coyote 視窗。按住跳躍不會自動再跳，放開不改變跳躍高度。可變跳高留待後續手感評估。
+- 鍵盤與觸控共用同一組方向和動作。相同控制須放開所有來源，下一次按下才會觸發新的動作。兩種裝置的鍵位和測試場模式見 [README](../README.md#平台測試場操作)。
+
+World void plane 在地圖底緣下方 64 units。角色腳底到達該 plane 時觸發墜落死亡。Village 應避免可達的 void，角色意外墜落時依同一規則重生。
 
 ## 3. 成長、EXP 與 attributes
 
@@ -269,13 +278,17 @@ Loot recipients **與 EXP 使用同一 death-time eligible set**，但不按 gro
 
 HP=0 當 tick 進 Death；同 tick combat ordering 依第4節，已存在的 reward snapshot 不回溯撤銷。3秒後在 Village `spawn_respawn`，HP／MP 全滿、velocity=0、無 EXP／currency／equipment penalty；party membership 保留，contribution 舊紀錄依 death-time eligibility 自行失效。
 
+本地測試場使用相同的 90 tick 計時，角色以靜止 grounded Idle 回到 Tiled 地圖的 `village/spawn_respawn`，清除輸入和動作。死亡動作的長度由重生時點決定，動畫播放進度不影響結果。
+
 Village 滿房時先 reserve 另一 Village instance；若 node admission cap 或 DB 不可用使 respawn 暫不可完成，保持 Death 與重試提示，不生成第二角色。斷線時若3秒 timer 已完成，保留來源 room 的 Death body 與 respawn-ready flag，重連成功後才開始 Village handoff；grace 到期則移除 body，下次新 session 直接返村。重連 grace 內活著的 character body 仍可被選為 monster target 並受傷，但 disconnected 狀態不能取得新 death rewards；不准藉 disconnect pause monster。
 
 重新建立 play session 一律在 Village、安全地補滿 HP／MP，不承諾保存離線戰鬥位置。已確認的 level、AP、EXP、currency、bag、equipment 與未過期 ground grant 保留。Account／角色限制與 session epoch 見 ARCHITECTURE。
 
 ## 10. NPC、設定與未決事項
 
-Village NPC 暫稱 Guide，放於 `npc_guide` object；角色距離 ≤96，E／touch interact 開啟 dialogue。內容含移動／跳躍／攻擊、HP potion、party eligibility、死亡返村與 portal 方向。無 quest state、shop 或 reward，對話本身不暫停 server。
+Village 的 Guide 使用 Tiled 的 `npc_guide` 點。角色腳底中心至該點的直線距離須 ≤96 world units。角色存活、接地且未處於 Attack、Hurt 或傳送時，可按 E 或觸控「互動」開啟對話。接近只顯示提示。再按一次互動鍵或點「關閉」可結束對話，離開範圍、倒地、傳送或重生時也會關閉。
+
+對話內容包含移動／跳躍／攻擊、HP 藥水、組隊獎勵資格、死亡返村與 portal 方向。對話期間照常步進，沒有 quest state、shop 或 reward。↑／W 和觸控 ↑ 依 §1.1 的條件啟動傳送，七圖走訪是 M2.5 的交付驗收。
 
 Config 分為 `physics`、`combat`、`progression`、`monsters`、`party`、`rewards`、`inventory`、`world`；每一份 build 指定 `balanceVersion`、`mapContentHash` 與 `protocolVersion`。Clock／session／DB retry 是 server operational config，不可由 client 修改。MVP 只在重啟／deploy 時換 balance，不做跨 tick hot reload。
 

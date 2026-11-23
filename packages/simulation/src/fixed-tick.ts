@@ -1,7 +1,6 @@
-import { toSimulationTick, type SimulationTick } from '@viesma/domain'
+import { fixedDeltaSeconds, ticksPerSecond, toSimulationTick, type SimulationTick } from '@viesma/domain'
 
-export const ticksPerSecond = 30
-export const fixedDeltaSeconds = 1 / ticksPerSecond
+export { fixedDeltaSeconds, ticksPerSecond } from '@viesma/domain'
 export const maxCatchUpTicks = 5
 
 export interface MonotonicClock {

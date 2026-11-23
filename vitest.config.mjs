@@ -6,6 +6,10 @@ export default defineConfig({
     // 以公開套件名稱載入 source entry，讓單元測試可在 build 前執行。
     alias: {
       '@viesma/domain': fileURLToPath(new URL('./packages/domain/src/index.ts', import.meta.url)),
+      '@viesma/game-data': fileURLToPath(new URL('./packages/game-data/src/index.ts', import.meta.url)),
+      '@viesma/network-colyseus': fileURLToPath(new URL('./packages/network-colyseus/src/index.ts', import.meta.url)),
+      '@viesma/physics': fileURLToPath(new URL('./packages/physics/src/index.ts', import.meta.url)),
+      '@viesma/protocol': fileURLToPath(new URL('./packages/protocol/src/index.ts', import.meta.url)),
       '@viesma/simulation': fileURLToPath(new URL('./packages/simulation/src/index.ts', import.meta.url)),
     },
   },

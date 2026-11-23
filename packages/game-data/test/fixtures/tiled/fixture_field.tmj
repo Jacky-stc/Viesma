@@ -1,0 +1,197 @@
+{
+  "type": "map",
+  "version": "1.10",
+  "tiledversion": "1.12.2",
+  "orientation": "orthogonal",
+  "infinite": false,
+  "renderorder": "right-down",
+  "width": 8,
+  "height": 5,
+  "tilewidth": 32,
+  "tileheight": 32,
+  "properties": [
+    {
+      "name": "mapId",
+      "type": "string",
+      "value": "fixture_field"
+    }
+  ],
+  "tilesets": [],
+  "layers": [
+    {
+      "type": "objectgroup",
+      "id": 2,
+      "name": "Gameplay",
+      "x": 0,
+      "y": 0,
+      "opacity": 1,
+      "visible": true,
+      "draworder": "topdown",
+      "objects": [
+        {
+          "id": 1,
+          "type": "SolidRect",
+          "name": "floor",
+          "x": 0,
+          "y": 128,
+          "width": 256,
+          "height": 32,
+          "rotation": 0,
+          "visible": true
+        },
+        {
+          "id": 2,
+          "type": "OneWayPlatform",
+          "name": "ledge",
+          "x": 96,
+          "y": 96,
+          "width": 64,
+          "height": 6,
+          "rotation": 0,
+          "visible": true
+        },
+        {
+          "id": 3,
+          "type": "PlayerSpawn",
+          "name": "",
+          "x": 112,
+          "y": 96,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true,
+          "point": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_from_fixture_hub"
+            },
+            {
+              "name": "facing",
+              "type": "string",
+              "value": "right"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "Portal",
+          "name": "",
+          "x": 216,
+          "y": 80,
+          "width": 32,
+          "height": 48,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "portalId",
+              "type": "string",
+              "value": "p_to_fixture_hub"
+            },
+            {
+              "name": "destinationMapId",
+              "type": "string",
+              "value": "fixture_hub"
+            },
+            {
+              "name": "destinationSpawnId",
+              "type": "string",
+              "value": "spawn_from_fixture_field"
+            },
+            {
+              "name": "reversePortalId",
+              "type": "string",
+              "value": "p_to_fixture_field"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "type": "MonsterSpawn",
+          "name": "",
+          "x": 52,
+          "y": 128,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true,
+          "point": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "slime_a"
+            },
+            {
+              "name": "monsterArchetypeId",
+              "type": "string",
+              "value": "slime"
+            },
+            {
+              "name": "level",
+              "type": "int",
+              "value": 2
+            },
+            {
+              "name": "floorId",
+              "type": "string",
+              "value": "floor"
+            },
+            {
+              "name": "patrolMinX",
+              "type": "int",
+              "value": 32
+            },
+            {
+              "name": "patrolMaxX",
+              "type": "int",
+              "value": 72
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "type": "MonsterSpawn",
+          "name": "",
+          "x": 168,
+          "y": 16,
+          "width": 48,
+          "height": 40,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "bat_a"
+            },
+            {
+              "name": "monsterArchetypeId",
+              "type": "string",
+              "value": "bat"
+            },
+            {
+              "name": "level",
+              "type": "int",
+              "value": 3
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "type": "LootFallback",
+          "name": "loot_fallback",
+          "x": 180,
+          "y": 128,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true,
+          "point": true
+        }
+      ]
+    }
+  ]
+}

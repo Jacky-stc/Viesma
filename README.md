@@ -15,6 +15,8 @@ pnpm dev
 
 開啟 Vite 在終端機顯示的本機網址，確認 React 入口顯示 Viesma。Vite 預設使用 `http://127.0.0.1:5173`，若連接埠已被占用，會使用下一個可用的連接埠。Colyseus server 監聽 `127.0.0.1:2567`，啟動後會在終端機顯示網址。開發 shell 只需要 Node.js 和 pnpm。
 
+Beginner 平台測試場需要支援 WebGL 的瀏覽器。角色自動循環示範移動、跳躍和動作，場景下方顯示碰撞圖例與目前狀態。使用「卸載場景」釋放畫面資源，再按「載入場景」從腳本起點播放。單獨開發 client 可執行 `pnpm --filter @viesma/client run dev`。渲染契約見 [ARCHITECTURE §10.1](docs/ARCHITECTURE.md#101-m13-平台測試場)。
+
 ### PostgreSQL 開發與測試服務
 
 需要資料庫時，啟動支援 Linux 容器的 Docker 與 Docker Compose v2。將 [`.env.example`](.env.example) 複製為根目錄的 `.env`，填入自己的本機開發密碼 `POSTGRES_PASSWORD`。Compose 預設在 `127.0.0.1:5432` 提供 PostgreSQL 18.7，可用 `POSTGRES_PORT` 更換主機埠。使用 `POSTGRES_USER` 與 `POSTGRES_DB` 指定初次建立 volume 時的使用者與資料庫。
@@ -77,6 +79,14 @@ pnpm --filter @viesma/simulation run test
 
 `lint` 檢查 source import 邊界，並在最後執行 workspace dependency graph 檢查。純單元測試置於 `apps/*/test/` 或 `packages/*/test/`，檔名以 `.test.ts` 或 `.test.mjs` 結尾。Simulation 的 headless harness 注入 clock、seed 與 ID，覆蓋 30 Hz 時序、固定 delta、catch-up 與重播。
 
+### Game data
+
+Server 在啟動時驗證初始 game data，並記錄 protocol 版本、balance 版本與 map manifest hash。資料修改方式及版本相容性見 [Game data 載入與版本](docs/GAME_DATA.md)。
+
+地圖編輯、匯出及 `pnpm run validate:maps` 用法見 [Tiled 地圖製作指南](docs/TILED_MAPS.md)。
+
+圖集登錄、授權與署名、`pnpm run validate:assets` 用法見 [視覺資產管線](docs/ASSETS.md)。正式建置會執行同一套資產檢查。
+
 ### App smoke
 
 Build 完成後，先安裝 Chromium，再執行 smoke 測試。
@@ -86,6 +96,37 @@ pnpm exec playwright install chromium
 pnpm run test:smoke
 ```
 
-Playwright 會啟停 production preview 與 Colyseus server，驗證 Chromium 顯示 Viesma，以及 `/__healthcheck` 回傳 HTTP 200。先關閉占用本機 4173 或 2567 埠的程序。CI 或缺瀏覽器系統套件的 Linux 可執行 `pnpm exec playwright install --with-deps chromium` 安裝 Chromium 和系統套件。
+Playwright 會啟停 production preview 與 Colyseus server，驗證 Chromium 的 WebGL 場景、鍵盤走訪七圖與抵達鏡頭、橫向觸控往返 Village 和兩張戰鬥圖、兩個獨立瀏覽器工作階段在 M1 同房移動，以及 `/__healthcheck` 回傳 HTTP 200。測試環境可使用 SwiftShader 繪圖。預設使用 4173 和 2567。若 2567 已有開發伺服器，PowerShell 可在同一個終端執行 `$env:VIESMA_SERVER_PORT = '25822'`，再執行 `pnpm run test:smoke --workers=1`。CI 或缺瀏覽器系統套件的 Linux 可執行 `pnpm exec playwright install --with-deps chromium` 安裝 Chromium 和系統套件。
+
+### M1 多人測試
+
+使用 `pnpm dev` 啟動 client 與本機 server。以兩個分頁開啟 Vite 網址，將場景模式切到「多人測試」。點選場景取得焦點後，以 ←／→ 或 A／D 移動、Space 跳躍。兩端的「同房角色數」會更新。切換模式或卸載場景就會離開房間。
+
+Vite dev 與 preview 以 `/multiplayer` 代理本機的 matchmaking 與 WebSocket。自訂連接埠時，讓兩個程序使用相同的 `VIESMA_SERVER_PORT`。角色為單次連線的匿名開發角色，入房會比對 protocol／balance／地圖內容版本。本人的移動由瀏覽器以 30 Hz 即時預測，再依伺服器確認重播。瀏覽器以 10 Hz 公開 patch 和 100 ms 的緩衝畫出同伴的移動與房內共用的巡邏 Slime。 [房間與同步契約](docs/ARCHITECTURE.md#5-input-protocol-與同步)
 
 CI 接著以一次性密碼執行上述 PostgreSQL health smoke，並清理由該 job 建立的容器與 volume。
+
+### 平台測試場操作
+
+測試場預設為「互動操作」。桌面可點擊場景或用 Tab 移入焦點。手機請橫向握持，用左側的方向鍵和右側的動作鍵，可多指同時移動與跳躍或攻擊。
+
+| 操作                   | 桌面鍵位       | 橫向觸控           |
+| ---------------------- | -------------- | ------------------ |
+| 向左／向右             | ← 或 A／→ 或 D | ←／→               |
+| 進入傳送門             | ↑ 或 W         | ↑                  |
+| 跳躍／攻擊             | Space／J       | 跳／攻             |
+| 互動／拾取             | E／F           | 互動／拾取         |
+| HP／MP 藥水            | 1／2           | HP／MP             |
+| 物品欄／隊伍／能力點數 | I／P／K        | 由後續面板任務接入 |
+
+進入 Village 的 Guide 互動範圍會顯示提示。按 E 或觸控「互動」可開關對話，也可點對話內的「關閉」。對話時可繼續移動，走遠會自動關閉。面板控制項取得焦點時，遊戲快捷鍵會停止接收。
+
+攻擊使用既有場景的測試動作。拾取、藥水和面板鍵的輸入結果會顯示在 HUD，對應的玩法由後續任務接入。開啟「操作說明」會清除遊戲輸入，關閉後可重新聚焦場景。
+
+鍵盤和觸控的同向輸入會合併，任一來源仍按住就維持該方向。左右同時按為中立並維持朝向。動作只在合併後的新按下觸發一次。失焦、切到背景、轉為直向以及卸載場景會清除按住的控制與待取樣動作。被取消或失去擷取的指標會各自釋放。
+
+測試場從 Village 開始。站在金色的傳送區，再按 ↑／W 或觸控 ↑ 可傳送。Village 的門從西往東通往 M3、M1、M2、M4，另可經 M1 走到 M5、經 M2 走到 M6。返回時走進反向門並重新按下。切換「場景模式」會重開場景。「腳本播放」自動重播七種角色狀態，包含進入 Forest Entrance、倒地及 3 秒後返村。HUD 顯示目前與最大 HP／MP，角色站在重生位置時顯示「安全區生成點」。
+
+Vite 開發模式的「開發用傷害測試」在 Forest Entrance 可送出 10 點傷害或一次致死傷害，並遵守受傷免疫及抵達保護。Village 會擋下傷害效果。倒地與重生會清除按住的控制及待送動作。正式建置可用「腳本播放」觀察同一套生命週期。
+
+鍵盤和觸控的瀏覽器 smoke 包含 667 × 375 橫向多指操作、指標取消及直橫向切換。取樣與序號契約見 [ARCHITECTURE §10.2](docs/ARCHITECTURE.md#102-m14-平台測試場輸入)。

@@ -4,6 +4,7 @@
     "lib": ["ES2022"],
     "types": ["node"],
     "module": "NodeNext",
+    "allowImportingTsExtensions": true,
     "noEmit": true
   },
   "include": ["vite.config.ts"]

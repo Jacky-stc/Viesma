@@ -7,7 +7,7 @@ const workspaceImports = {
   'apps/client': shared,
   'apps/server': [...shared, 'persistence'],
   'packages/domain': [],
-  'packages/game-data': ['domain'],
+  'packages/game-data': ['domain', 'physics'],
   'packages/physics': ['domain'],
   'packages/simulation': ['domain', 'game-data', 'physics'],
   'packages/protocol': ['domain'],

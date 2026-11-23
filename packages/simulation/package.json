@@ -14,6 +14,8 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@viesma/domain": "workspace:*"
+    "@viesma/domain": "workspace:*",
+    "@viesma/game-data": "workspace:*",
+    "@viesma/physics": "workspace:*"
   }
 }

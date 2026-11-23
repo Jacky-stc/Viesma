@@ -1,0 +1,392 @@
+{
+  "type": "map",
+  "version": "1.10",
+  "tiledversion": "1.10.2",
+  "orientation": "orthogonal",
+  "renderorder": "right-down",
+  "infinite": false,
+  "width": 96,
+  "height": 24,
+  "tilewidth": 32,
+  "tileheight": 32,
+  "nextlayerid": 6,
+  "nextobjectid": 15,
+  "properties": [
+    {
+      "name": "mapId",
+      "type": "string",
+      "value": "village"
+    }
+  ],
+  "layers": [
+    {
+      "id": 1,
+      "name": "Solid terrain",
+      "type": "objectgroup",
+      "draworder": "topdown",
+      "x": 0,
+      "y": 0,
+      "opacity": 1,
+      "visible": true,
+      "objects": [
+        {
+          "id": 1,
+          "name": "village_ground",
+          "type": "SolidRect",
+          "x": 0,
+          "y": 704,
+          "width": 3072,
+          "height": 64,
+          "rotation": 0,
+          "visible": true
+        },
+        {
+          "id": 2,
+          "name": "village_terrace",
+          "type": "SolidRect",
+          "x": 1408,
+          "y": 632,
+          "width": 288,
+          "height": 24,
+          "rotation": 0,
+          "visible": true
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "One-way platforms",
+      "type": "objectgroup",
+      "draworder": "topdown",
+      "x": 0,
+      "y": 0,
+      "opacity": 1,
+      "visible": true,
+      "objects": [
+        {
+          "id": 3,
+          "name": "village_walkway",
+          "type": "OneWayPlatform",
+          "x": 704,
+          "y": 632,
+          "width": 188,
+          "height": 12,
+          "rotation": 0,
+          "visible": true
+        },
+        {
+          "id": 4,
+          "name": "village_overlook",
+          "type": "OneWayPlatform",
+          "x": 1648,
+          "y": 560,
+          "width": 240,
+          "height": 12,
+          "rotation": 0,
+          "visible": true
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Player spawns",
+      "type": "objectgroup",
+      "draworder": "topdown",
+      "x": 0,
+      "y": 0,
+      "opacity": 1,
+      "visible": true,
+      "objects": [
+        {
+          "id": 5,
+          "name": "spawn_respawn",
+          "type": "PlayerSpawn",
+          "x": 640,
+          "y": 704,
+          "width": 0,
+          "height": 0,
+          "point": true,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_respawn"
+            },
+            {
+              "name": "facing",
+              "type": "string",
+              "value": "right"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "name": "spawn_from_m1",
+          "type": "PlayerSpawn",
+          "x": 1200,
+          "y": 704,
+          "width": 0,
+          "height": 0,
+          "point": true,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_from_m1"
+            },
+            {
+              "name": "facing",
+              "type": "string",
+              "value": "left"
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "name": "spawn_from_m2",
+          "type": "PlayerSpawn",
+          "x": 2224,
+          "y": 704,
+          "width": 0,
+          "height": 0,
+          "point": true,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_from_m2"
+            },
+            {
+              "name": "facing",
+              "type": "string",
+              "value": "left"
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "name": "spawn_from_m3",
+          "type": "PlayerSpawn",
+          "x": 416,
+          "y": 704,
+          "width": 0,
+          "height": 0,
+          "point": true,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_from_m3"
+            },
+            {
+              "name": "facing",
+              "type": "string",
+              "value": "right"
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "name": "spawn_from_m4",
+          "type": "PlayerSpawn",
+          "x": 2688,
+          "y": 704,
+          "width": 0,
+          "height": 0,
+          "point": true,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_from_m4"
+            },
+            {
+              "name": "facing",
+              "type": "string",
+              "value": "left"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Portals",
+      "type": "objectgroup",
+      "draworder": "topdown",
+      "x": 0,
+      "y": 0,
+      "opacity": 1,
+      "visible": true,
+      "objects": [
+        {
+          "id": 7,
+          "name": "p_to_m1",
+          "type": "Portal",
+          "x": 1056,
+          "y": 608,
+          "width": 96,
+          "height": 96,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "portalId",
+              "type": "string",
+              "value": "p_to_m1"
+            },
+            {
+              "name": "destinationMapId",
+              "type": "string",
+              "value": "m1"
+            },
+            {
+              "name": "destinationSpawnId",
+              "type": "string",
+              "value": "spawn_from_village"
+            },
+            {
+              "name": "reversePortalId",
+              "type": "string",
+              "value": "p_to_village"
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "name": "p_to_m2",
+          "type": "Portal",
+          "x": 2288,
+          "y": 608,
+          "width": 96,
+          "height": 96,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "portalId",
+              "type": "string",
+              "value": "p_to_m2"
+            },
+            {
+              "name": "destinationMapId",
+              "type": "string",
+              "value": "m2"
+            },
+            {
+              "name": "destinationSpawnId",
+              "type": "string",
+              "value": "spawn_from_village"
+            },
+            {
+              "name": "reversePortalId",
+              "type": "string",
+              "value": "p_to_village"
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "name": "p_to_m3",
+          "type": "Portal",
+          "x": 256,
+          "y": 608,
+          "width": 96,
+          "height": 96,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "portalId",
+              "type": "string",
+              "value": "p_to_m3"
+            },
+            {
+              "name": "destinationMapId",
+              "type": "string",
+              "value": "m3"
+            },
+            {
+              "name": "destinationSpawnId",
+              "type": "string",
+              "value": "spawn_from_village"
+            },
+            {
+              "name": "reversePortalId",
+              "type": "string",
+              "value": "p_to_village"
+            }
+          ]
+        },
+        {
+          "id": 13,
+          "name": "p_to_m4",
+          "type": "Portal",
+          "x": 2752,
+          "y": 608,
+          "width": 96,
+          "height": 96,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "portalId",
+              "type": "string",
+              "value": "p_to_m4"
+            },
+            {
+              "name": "destinationMapId",
+              "type": "string",
+              "value": "m4"
+            },
+            {
+              "name": "destinationSpawnId",
+              "type": "string",
+              "value": "spawn_from_village"
+            },
+            {
+              "name": "reversePortalId",
+              "type": "string",
+              "value": "p_to_village"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "NPCs",
+      "type": "objectgroup",
+      "draworder": "topdown",
+      "x": 0,
+      "y": 0,
+      "opacity": 1,
+      "visible": true,
+      "objects": [
+        {
+          "id": 14,
+          "name": "npc_guide",
+          "type": "Npc",
+          "point": true,
+          "x": 740,
+          "y": 704,
+          "width": 0,
+          "height": 0,
+          "rotation": 0,
+          "visible": true
+        }
+      ]
+    }
+  ],
+  "tilesets": []
+}

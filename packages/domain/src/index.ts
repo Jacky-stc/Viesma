@@ -11,6 +11,7 @@ export type {
   RewardRepository,
   SessionRepository,
 } from './repositories.js'
+export { fixedDeltaSeconds, ticksPerSecond } from './simulation-time.js'
 export { isNonNegativeSafeInteger, toSimulationTick } from './types.js'
 export type {
   AccountId,

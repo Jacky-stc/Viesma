@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "atlases": [
+    {
+      "id": "beginner-atlas",
+      "type": "atlas",
+      "source": "images/beginner.png",
+      "output": "game-assets/beginner-atlas.png",
+      "sha256": "5d82c9fe3c918a698c66797e65bab270e9a15b137906bf3723d6b7bdcd9b3ee2",
+      "width": 192,
+      "height": 168,
+      "optionalInDevelopment": false,
+      "rights": {
+        "kind": "original",
+        "creator": "Viesma M2.4 · Codex",
+        "license": "project-owned",
+        "evidence": "provenance/graybox.md",
+        "generator": "draw-graybox.mjs"
+      },
+      "sprites": [
+        {
+          "id": "beginner",
+          "type": "player",
+          "renderWidth": 64,
+          "renderHeight": 56,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 0,
+                  "y": 0,
+                  "width": 64,
+                  "height": 56
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            },
+            "run": {
+              "frames": [
+                {
+                  "x": 64,
+                  "y": 0,
+                  "width": 64,
+                  "height": 56
+                },
+                {
+                  "x": 128,
+                  "y": 0,
+                  "width": 64,
+                  "height": 56
+                }
+              ],
+              "ticksPerFrame": 4,
+              "loop": true
+            },
+            "jump": {
+              "frames": [
+                {
+                  "x": 0,
+                  "y": 56,
+                  "width": 64,
+                  "height": 56
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            },
+            "fall": {
+              "frames": [
+                {
+                  "x": 64,
+                  "y": 56,
+                  "width": 64,
+                  "height": 56
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            },
+            "attack": {
+              "frames": [
+                {
+                  "x": 128,
+                  "y": 56,
+                  "width": 64,
+                  "height": 56
+                },
+                {
+                  "x": 0,
+                  "y": 112,
+                  "width": 64,
+                  "height": 56
+                }
+              ],
+              "ticksPerFrame": 5,
+              "loop": false
+            },
+            "hurt": {
+              "frames": [
+                {
+                  "x": 64,
+                  "y": 112,
+                  "width": 64,
+                  "height": 56
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            },
+            "death": {
+              "frames": [
+                {
+                  "x": 128,
+                  "y": 112,
+                  "width": 64,
+                  "height": 56
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "village-atlas",
+      "type": "atlas",
+      "source": "images/village.png",
+      "output": "game-assets/village-atlas.png",
+      "sha256": "d9d6dc1855aa60bfe9ed3c57e2b3b7c4063802bfe9d3832d5594501dc827d700",
+      "width": 64,
+      "height": 48,
+      "optionalInDevelopment": true,
+      "rights": {
+        "kind": "original",
+        "creator": "Viesma M2.4 · Codex",
+        "license": "project-owned",
+        "evidence": "provenance/graybox.md",
+        "generator": "draw-graybox.mjs"
+      },
+      "sprites": [
+        {
+          "id": "village-trail-tile",
+          "type": "tile",
+          "renderWidth": 32,
+          "renderHeight": 32,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 0,
+                  "y": 0,
+                  "width": 32,
+                  "height": 32
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            }
+          }
+        },
+        {
+          "id": "village-guide",
+          "type": "npc",
+          "renderWidth": 32,
+          "renderHeight": 48,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 32,
+                  "y": 0,
+                  "width": 32,
+                  "height": 48
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "field-atlas",
+      "type": "atlas",
+      "source": "images/field.png",
+      "output": "game-assets/field-atlas.png",
+      "sha256": "983265c05f3e2ca72dac22e963d54ef8bb486c6db51c9bcbeba22681d1d68736",
+      "width": 128,
+      "height": 32,
+      "optionalInDevelopment": true,
+      "rights": {
+        "kind": "original",
+        "creator": "Viesma M2.4 · Codex",
+        "license": "project-owned",
+        "evidence": "provenance/graybox.md",
+        "generator": "draw-graybox.mjs"
+      },
+      "sprites": [
+        {
+          "id": "slime",
+          "type": "monster",
+          "renderWidth": 32,
+          "renderHeight": 32,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 0,
+                  "y": 0,
+                  "width": 32,
+                  "height": 32
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            }
+          }
+        },
+        {
+          "id": "mushroom",
+          "type": "monster",
+          "renderWidth": 32,
+          "renderHeight": 32,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 32,
+                  "y": 0,
+                  "width": 32,
+                  "height": 32
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            }
+          }
+        },
+        {
+          "id": "bat",
+          "type": "monster",
+          "renderWidth": 32,
+          "renderHeight": 32,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 64,
+                  "y": 0,
+                  "width": 32,
+                  "height": 32
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            }
+          }
+        },
+        {
+          "id": "loot-pouch",
+          "type": "loot",
+          "renderWidth": 22,
+          "renderHeight": 22,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 96,
+                  "y": 0,
+                  "width": 32,
+                  "height": 32
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

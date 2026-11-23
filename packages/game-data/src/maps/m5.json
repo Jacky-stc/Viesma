@@ -1,0 +1,750 @@
+{
+  "type": "map",
+  "version": "1.10",
+  "tiledversion": "1.10.2",
+  "orientation": "orthogonal",
+  "renderorder": "right-down",
+  "infinite": false,
+  "width": 160,
+  "height": 48,
+  "tilewidth": 32,
+  "tileheight": 32,
+  "nextlayerid": 7,
+  "nextobjectid": 27,
+  "properties": [
+    {
+      "name": "mapId",
+      "type": "string",
+      "value": "m5"
+    }
+  ],
+  "layers": [
+    {
+      "id": 1,
+      "name": "Solid terrain",
+      "type": "objectgroup",
+      "draworder": "topdown",
+      "x": 0,
+      "y": 0,
+      "opacity": 1,
+      "visible": true,
+      "objects": [
+        {
+          "id": 1,
+          "name": "deep_forest_ground",
+          "type": "SolidRect",
+          "x": 0,
+          "y": 1408,
+          "width": 5120,
+          "height": 128,
+          "rotation": 0,
+          "visible": true
+        },
+        {
+          "id": 2,
+          "name": "deep_root_deck",
+          "type": "SolidRect",
+          "x": 640,
+          "y": 1336,
+          "width": 384,
+          "height": 24,
+          "rotation": 0,
+          "visible": true
+        },
+        {
+          "id": 3,
+          "name": "deep_east_deck",
+          "type": "SolidRect",
+          "x": 1760,
+          "y": 1264,
+          "width": 450,
+          "height": 24,
+          "rotation": 0,
+          "visible": true
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "One-way platforms",
+      "type": "objectgroup",
+      "draworder": "topdown",
+      "x": 0,
+      "y": 0,
+      "opacity": 1,
+      "visible": true,
+      "objects": [
+        {
+          "id": 4,
+          "name": "deep_west_branch",
+          "type": "OneWayPlatform",
+          "x": 954,
+          "y": 1264,
+          "width": 326,
+          "height": 12,
+          "rotation": 0,
+          "visible": true
+        },
+        {
+          "id": 5,
+          "name": "deep_mid_branch",
+          "type": "OneWayPlatform",
+          "x": 1210,
+          "y": 1192,
+          "width": 310,
+          "height": 12,
+          "rotation": 0,
+          "visible": true
+        },
+        {
+          "id": 6,
+          "name": "deep_high_branch",
+          "type": "OneWayPlatform",
+          "x": 1480,
+          "y": 1120,
+          "width": 296,
+          "height": 12,
+          "rotation": 0,
+          "visible": true
+        },
+        {
+          "id": 7,
+          "name": "deep_canopy",
+          "type": "OneWayPlatform",
+          "x": 1750,
+          "y": 1048,
+          "width": 310,
+          "height": 12,
+          "rotation": 0,
+          "visible": true
+        },
+        {
+          "id": 8,
+          "name": "deep_east_branch",
+          "type": "OneWayPlatform",
+          "x": 1650,
+          "y": 1336,
+          "width": 290,
+          "height": 12,
+          "rotation": 0,
+          "visible": true
+        },
+        {
+          "id": 9,
+          "name": "deep_low_shelf",
+          "type": "OneWayPlatform",
+          "x": 2480,
+          "y": 1336,
+          "width": 280,
+          "height": 12,
+          "rotation": 0,
+          "visible": true
+        },
+        {
+          "id": 10,
+          "name": "deep_mid_shelf",
+          "type": "OneWayPlatform",
+          "x": 2640,
+          "y": 1264,
+          "width": 340,
+          "height": 12,
+          "rotation": 0,
+          "visible": true
+        },
+        {
+          "id": 11,
+          "name": "deep_high_shelf",
+          "type": "OneWayPlatform",
+          "x": 2960,
+          "y": 1192,
+          "width": 320,
+          "height": 12,
+          "rotation": 0,
+          "visible": true
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Player spawns",
+      "type": "objectgroup",
+      "draworder": "topdown",
+      "x": 0,
+      "y": 0,
+      "opacity": 1,
+      "visible": true,
+      "objects": [
+        {
+          "id": 12,
+          "name": "spawn_from_m1",
+          "type": "PlayerSpawn",
+          "x": 320,
+          "y": 1408,
+          "width": 0,
+          "height": 0,
+          "point": true,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_from_m1"
+            },
+            {
+              "name": "facing",
+              "type": "string",
+              "value": "right"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Portals",
+      "type": "objectgroup",
+      "draworder": "topdown",
+      "x": 0,
+      "y": 0,
+      "opacity": 1,
+      "visible": true,
+      "objects": [
+        {
+          "id": 13,
+          "name": "p_to_m1",
+          "type": "Portal",
+          "x": 160,
+          "y": 1312,
+          "width": 96,
+          "height": 96,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "portalId",
+              "type": "string",
+              "value": "p_to_m1"
+            },
+            {
+              "name": "destinationMapId",
+              "type": "string",
+              "value": "m1"
+            },
+            {
+              "name": "destinationSpawnId",
+              "type": "string",
+              "value": "spawn_from_m5"
+            },
+            {
+              "name": "reversePortalId",
+              "type": "string",
+              "value": "p_to_m5"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Monster spawns",
+      "type": "objectgroup",
+      "draworder": "topdown",
+      "x": 0,
+      "y": 0,
+      "opacity": 1,
+      "visible": true,
+      "objects": [
+        {
+          "id": 14,
+          "name": "spawn_slime_1",
+          "type": "MonsterSpawn",
+          "x": 500,
+          "y": 1408,
+          "width": 0,
+          "height": 0,
+          "point": true,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_slime_1"
+            },
+            {
+              "name": "monsterArchetypeId",
+              "type": "string",
+              "value": "slime"
+            },
+            {
+              "name": "level",
+              "type": "int",
+              "value": 15
+            },
+            {
+              "name": "floorId",
+              "type": "string",
+              "value": "deep_forest_ground"
+            },
+            {
+              "name": "patrolMinX",
+              "type": "int",
+              "value": 452
+            },
+            {
+              "name": "patrolMaxX",
+              "type": "int",
+              "value": 548
+            }
+          ]
+        },
+        {
+          "id": 15,
+          "name": "spawn_slime_2",
+          "type": "MonsterSpawn",
+          "x": 1220,
+          "y": 1408,
+          "width": 0,
+          "height": 0,
+          "point": true,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_slime_2"
+            },
+            {
+              "name": "monsterArchetypeId",
+              "type": "string",
+              "value": "slime"
+            },
+            {
+              "name": "level",
+              "type": "int",
+              "value": 15
+            },
+            {
+              "name": "floorId",
+              "type": "string",
+              "value": "deep_forest_ground"
+            },
+            {
+              "name": "patrolMinX",
+              "type": "int",
+              "value": 1172
+            },
+            {
+              "name": "patrolMaxX",
+              "type": "int",
+              "value": 1268
+            }
+          ]
+        },
+        {
+          "id": 16,
+          "name": "spawn_slime_3",
+          "type": "MonsterSpawn",
+          "x": 2330,
+          "y": 1408,
+          "width": 0,
+          "height": 0,
+          "point": true,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_slime_3"
+            },
+            {
+              "name": "monsterArchetypeId",
+              "type": "string",
+              "value": "slime"
+            },
+            {
+              "name": "level",
+              "type": "int",
+              "value": 15
+            },
+            {
+              "name": "floorId",
+              "type": "string",
+              "value": "deep_forest_ground"
+            },
+            {
+              "name": "patrolMinX",
+              "type": "int",
+              "value": 2282
+            },
+            {
+              "name": "patrolMaxX",
+              "type": "int",
+              "value": 2378
+            }
+          ]
+        },
+        {
+          "id": 17,
+          "name": "spawn_slime_4",
+          "type": "MonsterSpawn",
+          "x": 3420,
+          "y": 1408,
+          "width": 0,
+          "height": 0,
+          "point": true,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_slime_4"
+            },
+            {
+              "name": "monsterArchetypeId",
+              "type": "string",
+              "value": "slime"
+            },
+            {
+              "name": "level",
+              "type": "int",
+              "value": 15
+            },
+            {
+              "name": "floorId",
+              "type": "string",
+              "value": "deep_forest_ground"
+            },
+            {
+              "name": "patrolMinX",
+              "type": "int",
+              "value": 3372
+            },
+            {
+              "name": "patrolMaxX",
+              "type": "int",
+              "value": 3468
+            }
+          ]
+        },
+        {
+          "id": 18,
+          "name": "spawn_mushroom_1",
+          "type": "MonsterSpawn",
+          "x": 3850,
+          "y": 1408,
+          "width": 0,
+          "height": 0,
+          "point": true,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_mushroom_1"
+            },
+            {
+              "name": "monsterArchetypeId",
+              "type": "string",
+              "value": "mushroom"
+            },
+            {
+              "name": "level",
+              "type": "int",
+              "value": 17
+            },
+            {
+              "name": "floorId",
+              "type": "string",
+              "value": "deep_forest_ground"
+            },
+            {
+              "name": "patrolMinX",
+              "type": "int",
+              "value": 3802
+            },
+            {
+              "name": "patrolMaxX",
+              "type": "int",
+              "value": 3898
+            }
+          ]
+        },
+        {
+          "id": 19,
+          "name": "spawn_mushroom_2",
+          "type": "MonsterSpawn",
+          "x": 4320,
+          "y": 1408,
+          "width": 0,
+          "height": 0,
+          "point": true,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_mushroom_2"
+            },
+            {
+              "name": "monsterArchetypeId",
+              "type": "string",
+              "value": "mushroom"
+            },
+            {
+              "name": "level",
+              "type": "int",
+              "value": 17
+            },
+            {
+              "name": "floorId",
+              "type": "string",
+              "value": "deep_forest_ground"
+            },
+            {
+              "name": "patrolMinX",
+              "type": "int",
+              "value": 4272
+            },
+            {
+              "name": "patrolMaxX",
+              "type": "int",
+              "value": 4368
+            }
+          ]
+        },
+        {
+          "id": 20,
+          "name": "spawn_mushroom_3",
+          "type": "MonsterSpawn",
+          "x": 815,
+          "y": 1336,
+          "width": 0,
+          "height": 0,
+          "point": true,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_mushroom_3"
+            },
+            {
+              "name": "monsterArchetypeId",
+              "type": "string",
+              "value": "mushroom"
+            },
+            {
+              "name": "level",
+              "type": "int",
+              "value": 17
+            },
+            {
+              "name": "floorId",
+              "type": "string",
+              "value": "deep_root_deck"
+            },
+            {
+              "name": "patrolMinX",
+              "type": "int",
+              "value": 767
+            },
+            {
+              "name": "patrolMaxX",
+              "type": "int",
+              "value": 863
+            }
+          ]
+        },
+        {
+          "id": 21,
+          "name": "spawn_mushroom_4",
+          "type": "MonsterSpawn",
+          "x": 1990,
+          "y": 1264,
+          "width": 0,
+          "height": 0,
+          "point": true,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_mushroom_4"
+            },
+            {
+              "name": "monsterArchetypeId",
+              "type": "string",
+              "value": "mushroom"
+            },
+            {
+              "name": "level",
+              "type": "int",
+              "value": 17
+            },
+            {
+              "name": "floorId",
+              "type": "string",
+              "value": "deep_east_deck"
+            },
+            {
+              "name": "patrolMinX",
+              "type": "int",
+              "value": 1942
+            },
+            {
+              "name": "patrolMaxX",
+              "type": "int",
+              "value": 2038
+            }
+          ]
+        },
+        {
+          "id": 22,
+          "name": "spawn_bat_1",
+          "type": "MonsterSpawn",
+          "x": 680,
+          "y": 1120,
+          "width": 230,
+          "height": 130,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_bat_1"
+            },
+            {
+              "name": "monsterArchetypeId",
+              "type": "string",
+              "value": "bat"
+            },
+            {
+              "name": "level",
+              "type": "int",
+              "value": 19
+            }
+          ]
+        },
+        {
+          "id": 23,
+          "name": "spawn_bat_2",
+          "type": "MonsterSpawn",
+          "x": 1330,
+          "y": 1000,
+          "width": 160,
+          "height": 130,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_bat_2"
+            },
+            {
+              "name": "monsterArchetypeId",
+              "type": "string",
+              "value": "bat"
+            },
+            {
+              "name": "level",
+              "type": "int",
+              "value": 19
+            }
+          ]
+        },
+        {
+          "id": 24,
+          "name": "spawn_bat_3",
+          "type": "MonsterSpawn",
+          "x": 2250,
+          "y": 1040,
+          "width": 240,
+          "height": 130,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_bat_3"
+            },
+            {
+              "name": "monsterArchetypeId",
+              "type": "string",
+              "value": "bat"
+            },
+            {
+              "name": "level",
+              "type": "int",
+              "value": 19
+            }
+          ]
+        },
+        {
+          "id": 25,
+          "name": "spawn_bat_4",
+          "type": "MonsterSpawn",
+          "x": 3370,
+          "y": 1110,
+          "width": 250,
+          "height": 140,
+          "rotation": 0,
+          "visible": true,
+          "properties": [
+            {
+              "name": "spawnId",
+              "type": "string",
+              "value": "spawn_bat_4"
+            },
+            {
+              "name": "monsterArchetypeId",
+              "type": "string",
+              "value": "bat"
+            },
+            {
+              "name": "level",
+              "type": "int",
+              "value": 19
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Loot fallbacks",
+      "type": "objectgroup",
+      "draworder": "topdown",
+      "x": 0,
+      "y": 0,
+      "opacity": 1,
+      "visible": true,
+      "objects": [
+        {
+          "id": 26,
+          "name": "loot_bat_fallback",
+          "type": "LootFallback",
+          "x": 2330,
+          "y": 1408,
+          "width": 0,
+          "height": 0,
+          "point": true,
+          "rotation": 0,
+          "visible": true
+        }
+      ]
+    }
+  ],
+  "tilesets": []
+}

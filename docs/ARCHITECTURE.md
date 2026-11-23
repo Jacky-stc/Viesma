@@ -82,7 +82,7 @@ docs/
 | Package／area | 可依賴 | 禁止／責任界線 |
 | --- | --- | --- |
 | `domain` | TypeScript 標準型別 | 無 framework、I/O 或 balance policy；提供 repository port 與 plain models |
-| `game-data` | domain | 版本化 definitions、validation，不讀 DB、不依賴 UI |
+| `game-data` | domain、physics | 版本化 definitions、Tiled 匯入與出生幾何驗證，不讀 DB、不依賴 UI |
 | `physics` | domain | 純 math／geometry，無 DOM、wall clock 或 network |
 | `simulation` | domain、game-data、physics | 不依賴 React／Pixi／Colyseus／Drizzle／Node I/O；無 database transaction |
 | `protocol` | domain 的必要 wire-safe types | 不包含 DB entities 或 credentials；client input 必須 runtime validate |
@@ -91,9 +91,11 @@ docs/
 | `apps/server` | 上述 server 所需 packages | 唯一 authority composition root；管理 locks、sessions 與 side effects |
 | `apps/client` | domain、game-data、physics、simulation、protocol、network adapter | 不 import persistence 或 server；shared pure policies 不代表 client 可決定結果 |
 
+M2.4 的 [視覺資產管線](ASSETS.md) 在 Vite 建置端驗證本機圖集、引用及授權紀錄，瀏覽器取得只含渲染所需資料的 manifest。Pixi 依穩定 ID 延遲載入圖集，地圖切換時釋放前一張圖的資源。Sprite 尺寸與動畫只屬於 client presentation。
+
 Repository ports 在 domain 的 application boundary 定義，例如 `CharacterRepository`、`RewardRepository`、`InventoryRepository`、`SessionRepository`；memory／PG adapter 共用契約。Domain reward intent 不使用 Colyseus Schema。初期不額外建立通用 event bus、CQRS framework、service container 或 ECS；使用明確函式、entity maps 與小型 services。
 
-M0.2 建立 `domain`、`physics`、`simulation`、`protocol` 與 `network-colyseus` 的 workspace 公開入口。Domain 提供 plain models 和 repository ports，physics 提供世界座標與 AABB 契約，protocol 提供 `InputFrame` 與公開 room header 的 wire DTO，network adapter 將 map instance 與 tick 投影為 room header。Game-data 由 M0.4 建立，Colyseus Schema 與 room 接線由 M3.1 建立，repository 實作按 M5–M7 的任務交付。
+M0.2 建立 `domain`、`physics`、`simulation`、`protocol` 與 `network-colyseus` 的 workspace 公開入口。Domain 提供 plain models 和 repository ports，physics 提供世界座標與 AABB 契約，protocol 提供 `InputFrame` 與公開 room header 的 wire DTO，network adapter 將 map instance 與 tick 投影為 room header。M0.4 建立 [game-data 的 schema、fixture 與載入契約](GAME_DATA.md)。Colyseus Schema 與 room 接線由 M3.1 建立，repository 實作按 M5–M7 的任務交付。
 
 ## 3. Ownership matrix
 
@@ -115,7 +117,7 @@ M0.2 建立 `domain`、`physics`、`simulation`、`protocol` 與 `network-colyse
 
 Simulation API 概念上為 `step(state, commands, dt, context) -> {state, events}`；state 是明確 Player／Monster／Map／Attack models，context 注入 tick、RNG 及讀取用 definitions。不得自行呼叫 `Date.now()`、`Math.random()`、DB 或 framework callback。Loot expiry／session／transaction deadline 使用 application wall clock，與 simulation tick 分離。
 
-M0.2 的 `step` 接受呼叫端注入的下一個 tick、RNG 與 ID source。此階段只推進 tick 並回傳空事件，command 與 definitions 隨後續任務加入。`createFixedTickDriver` 接受 monotonic clock（毫秒）與同步 tick callback，固定傳入 `dt = 1 / 30` 秒。每次 `advance()` 回報已執行步數與尚未執行的完整 ticks，保留積欠時間供後續呼叫補跑。
+`step` 接受呼叫端注入的下一個 tick、RNG 與 ID source。M1.2 透過 context 注入 map 的角色控制器與當 tick 的 action 事件。`createFixedTickDriver` 接受 monotonic clock（毫秒）與同步 tick callback，固定傳入 `dt = 1 / 30` 秒。每次 `advance()` 回報已執行步數與尚未執行的完整 ticks，保留積欠時間供後續呼叫補跑。
 
 Server 以單一 fixed scheduler 每 1/30 秒推進所有 rooms，rooms 按 stable ID 排序；accumulator 使用 monotonic clock。單次 callback 最多補5 ticks；落後時不放大 dt、不跳過 collision 直接快轉；記錄 lag 並暫停新 admission，持續超載則降容量或 drain。不能同時使用 Colyseus fixed loop 與另一個 accumulator 造成雙重 step；M0.1 選定 adapter API，M3.1 驗證「每 tick 一次」。
 
@@ -132,6 +134,56 @@ Death snapshot 當下符合條件者之後同 tick 被 monster 打死，仍保�
 
 Client 以同樣30Hz跑 local physics，render 以 `requestAnimationFrame` 自由更新。State 量化與 collision epsilon 初值1/1024 world unit；重播 fixtures 比較 discrete states 與可接受誤差。沒有 full-world lockstep 或跨 client deterministic combat requirement。
 
+### 4.1 M1.1 平台碰撞契約
+
+`@viesma/physics` 的 `createPhysicsStepper` 預先驗證、複製並排序靜態 AABB，回傳可接入 `createFixedTickDriver` 的純單步函式。Physics 與 simulation 共用同一個 `fixedDeltaSeconds`。呼叫端傳入帶符號的水平速度與單 tick 跳躍請求，接收新 AABB、速度、`grounded` 與 `inVoid`。
+
+- AABB 的 `origin` 是左上角，+x 向右、+y 向下。寬高以 world units 表示，速度以 units/s 表示。輸入的 AABB 及 void 深度採 1/1024 unit 格線，寬高至少一格。每軸目標座標先捨入到最近一格，正好半格時往正座標方向取整。座標與一次步進後的 AABB 邊緣皆須在 ±1,048,576 units 內，速度絕對值上限為 1,048,576 units/s。
+- 每 tick 先採用水平速度，並於起點有支撐且未往上移動時接受跳躍速度，再加重力並套用下降終端速度。先 X 後 Y，垂直掃掠用解算後的 X。兩軸各找路徑上最近的阻擋面，可跨越任意數量的格線；撞擊只將該軸速度歸零。掃掠的路徑是水平再垂直兩段，斜向角落依此順序解算。
+- 垂直於掃掠軸的投影須有正交疊，剛好碰到邊緣或角點可通過。格線的一格是最小有效交疊，接觸面使用格線上的精確座標。Solid 四面皆阻擋，one-way 僅在下落且 tick 起點腳底位於平台頂面或更高時阻擋。踩在平台上時腳底接觸頂面，且水平投影仍須交疊。走出邊緣當 tick 失去支撐；有起始支撐的跳躍仍可於同 tick 離開邊緣。
+- 世界左、右與上方邊界為阻擋面；底部保持開放。腳底到達 `bounds` 底緣加 void 深度時回傳 `inVoid`。Simulation 在跨越當 tick 結算墜落死亡。起點已穿入 solid 或超出世界左、右、上邊界時拒絕步進，初始位置須由呼叫端提供。
+- 每個 body 每 tick 最多進行數次線性 collider 掃描。碰撞結果以最近阻擋面決定，幾何順序固定，同面接觸不依賴原始陣列順序。支援的地形為符合格線精度的靜態矩形與水平單向平台。
+
+### 4.2 M1.2 角色與指令契約
+
+- `createPlayerController(world, balance)` 以 map 靜態碰撞幾何與版控平衡資料建立控制器。`createPlayer(characterId, position, grounded, facing?)` 接受 authority 提供的 spawn 位置與支撐狀態，預設朝右。`SimulationPlayer` 保存左上角 `position`、物理速度與接觸旗標、movement intent、facing、locomotion 與 action。`getPlayerPresentationState` 依 [GAME_DESIGN §2.1](GAME_DESIGN.md#21-狀態機) 投影七種狀態，Attack 的朝向取自 `action.facing`。
+- `step` 接受 `{ kind: 'input', characterId, lifeStartedTick, seq, moveX, jumpPressed }`。`lifeStartedTick` 標記角色的當前生命，初始為 0，每次重生換成重生 tick。`seq` 是生命內的非負安全整數，`moveX` 為 -1／0／1，`jumpPressed` 只代表該幀新按下。`normalizeMovementInput` 將邏輯按鍵轉成後兩個欄位，左右同按為中立，跳躍只在由放開轉為按下時產生 edge。
+- Simulation 檢查指令的欄位、目標與序列。指令若包含額外欄位、格式錯誤、角色未知或 `seq` 小於或等於該角色已處理的序列，整筆忽略。每角色每 tick 最多採用一幀。同批送達多幀時採用最高有效新序列，該序列的相同重複幀視為一幀，內容衝突時該角色整個 tick 沿用無新輸入規則。輸入缺席時僅保留水平意圖，連續第 6 tick 起回到中立。Edge 每幀只檢查一次。角色以 `characterId` 字串順序更新。
+- `context.playerActionEvents` 為 authority 提供的 `attackStarted`、`attackEnded` 表現 fixture。事件按角色與種類合併，並須屬於當前生命。Attack 結束訊號先處理，無有效 action 時才可接受開始訊號。觸發 Attack 時鎖定當 tick 的 facing，空中仍持續物理。有效受傷會取消 Attack 並進入 6 ticks Hurt，期間丟棄待跳與新 jump edge。
+- 每個進行移動的角色每 tick 只呼叫一次 physics。Coyote jump 以控制器已驗證的一次性 `allowCoyoteJump` 授權，physics 負責 impulse、gravity 與碰撞。房間／連線 epoch、身份綁定、佇列和傳輸驗證由 server adapter 處理，transport DTO 沿用 §5.1。
+
+### 4.3 M1.5 HP／MP 與重生契約
+
+- `SimulationPlayer.vitals` 由 simulation 持有。初始值來自 [Game Data](GAME_DATA.md) 的 Beginner 平衡，HP 50／50、MP 30／30。數值保持在 0 至各自上限。測試效果可扣除或恢復 MP，正式技能費用與物品使用依後續任務驗證。
+- `context.playerVitalEffects` 是本地 authority 的測試入口，接受當 tick、當前生命的 `damage`、`heal`、`spendMp`、`restoreMp`。數量須為正的安全整數。`order` 是 authority 在該 tick 為同角色指派的非負安全整數，依序套用。相同角色、生命、tick、order 的同內容只處理一次，內容衝突時捨棄該位置。其他 tick 或生命的效果與未知角色一律忽略。
+- Fixture 的效果先於移動與動作。有效傷害立即鎖定 30 tick 傷害免疫，受傷當 tick 起計。HP 歸零即停止後續效果及當 tick 操作。若物理回傳 `inVoid`，同 tick 直接死亡，包含仍受免疫或重生保護的角色。死亡清除水平意圖、jump buffer、coyote、速度與 Attack。Dead body 只等待重生，直到時限前保持原樣。
+- 單圖 harness 可用 `createSafeHubSpawn` 驗證 fixture 生成點，檢查安全區、角色淨空與支撐面。單圖 `step` 接受 map ID 相符的已驗證位置。七圖測試場由本地世界控制器使用匯入器驗證的 Village 生成點。
+- 死亡 tick 為 D 時，D + 90 恢復同一角色 body、補滿 HP／MP，以靜止 grounded Idle 進入新生命。該 tick 清除一切動作和移動序列，下一 tick 才接受新生命的輸入。重生保護自該 tick 起 90 ticks，接受 Attack 時立即解除。生命標記只用於 runtime，未來由 adapter 綁定已驗證的輸入和 action，不由 wire payload 任意指定。
+- `playerDied`／`playerRespawned` 各在轉移時發出一次，按角色 ID 排序。兩者共用由死亡來源的 map instance、character ID、死亡 tick 組成的 `deathId`。重生依 fixed tick 與可用目的地推進。Animation 只讀取投影。
+
+### 4.4 M2.2 本地地圖與傳送
+
+- Server 啟動和 client 測試場都用 `loadGrayboxGameData` 驗證七圖 graybox，並由同一份 Tiled 內容產生正規化地圖。Simulation 按當前 map ID 選擇角色控制器及對應的碰撞資料，渲染讀取同一份正規化幾何。
+- M1.4 將 ↑、W 和觸控 ↑ 的按住來源合併，每次從放開到按下只鎖存一個 `portalPressed`。本地世界在 M1.2 移動幀增加 `portalPressed` 和 `mapEpoch`，沿用角色、生命、`seq`、同批去重及衝突檢查。舊 mapEpoch 或生命的命令無效。傳送保留實體 Up 的按住狀態，直到所有來源放開才可再次產生邊緣。
+- 每 tick 查當前角色在步進前的 portal 交疊，使用正常步進處理生命、動作與移動。步進前後都符合接地及動作狀態，且載入了目的圖和目的 spawn，才在同一個結果切換 map ID、map instance、角色位置與朝向。成功只發出一次 `playerTransferred`，並增加 `mapEpoch`。失敗沿用本 tick 的來源步進結果。Portal 啟動使用輸入邊緣，無額外計時限制。
+- Village 阻擋傷害效果，並以連續地板封住可達的 void。戰鬥圖的傳送抵達保護由抵達 tick 起算 90 ticks，和生命起點分開。死亡滿 90 ticks 後，控制器以相同角色和 `deathId` 返回 `village/spawn_respawn`，重設移動序列、生命標記和 HP／MP，並增加 `mapEpoch`。
+- Client 在 mapEpoch 變動時將前一個渲染快照設為新位置。渲染器在既有 PixiJS Application 更新地形，直接對目的地 bounds 計算相機，再繼續正常插值。整個過程沿用同一個 30 Hz tick driver。
+
+### 4.5 M2.5 Guide 互動
+
+- 發行用世界載入器將 Guide 設定連結至 Village 的正規化 `Npc` 點。距離以角色腳底中心與該點的平方距離比較。開啟時檢查同一地圖與步進前後的生命、動作、接地和距離。
+- `LocalMapInputCommand` 可附 Guide 開關請求，沿用角色、生命、mapEpoch、序號及同批衝突檢查。E／觸控「互動」以按下邊緣切換，面板關閉請求另帶開啟 tick 以識別該次對話。成功傳送與重生先於開啟，並清除舊圖對話。死亡及超出範圍也各只發出一次關閉事件。
+- 對話 context 由本地 simulation 持有。React 使用唯讀投影顯示對話與操作提示，Pixi 依 Tiled 點繪製 Guide。場景取得焦點時才接收遊戲按鍵，面板控制項取得焦點時鍵盤輸入不進入遊戲。對話期間可在場景繼續移動。此處的請求屬本地輸入，線上指令接入由後續任務處理。
+
+### 4.6 M3.1 M1 開發房
+
+- 本機 server 註冊 `map` 房型，地圖固定為 M1。Colyseus 管理 WebSocket、一次性 seat reservation、逾時及自動銷毀。框架以連線加預留席位執行 20 席上限。Room 在驗證版本後再登記 active CharacterActor，並同樣限制 20 名。開發角色與 connectionEpoch 均由 server 指派，生命週期為單次連線。
+- 每個 server 建立一個 WorldCoordinator。第一間房註冊時啟動單一 monotonic `createFixedTickDriver`，依 map instance ID 順序同步步進各房。新房以當前 world tick 為起點。房間各自擁有 state、actor registry 與待處理輸入。補跑以每次喚醒最多 5 ticks 為限，維持 `dt = 1 / 30`，剩餘時間留到下次喚醒。補跑尚有欠步時記錄告警並暫停新連線入房，追上後恢復。最後一房離開 coordinator 時停止 scheduler。
+- Join 在 tick 邊界以伺服器載入的 `m1/spawn_from_village` 呼叫 `createPlayer`。Leave 立即撤銷輸入資格、釋放 actor 與待處理輸入，其 body 在下一個 tick 移除。房間銷毀時清空房內執行狀態並解除 scheduler 註冊。
+- 線上 `InputFrame` 驗證 exact fields、版本、連線／地圖 epoch、序號和型別。每角色以 40/s、burst 80 限流，WebSocket payload 上限為 4 KiB。M3.1 使用單幀暫存，M3.2 接入 §5.1 的有界佇列與 §5.2 的本人 checkpoint。線上角色可左右移動及跳躍，Attack edge 保留供後續任務使用。
+- `@viesma/protocol` 定義 wire DTO。Server 把 domain state 投影成角色 ID、左上角座標、朝向、狀態與 HP／MaxHP，再由 `@viesma/network-colyseus` 的 Schema 送出。公開房間欄位包含 map ID、map instance ID、內容 hash 與 server tick。Colyseus 每 100 ms 評估一次最新快照。只有本人收到自己的角色 ID 與連線／地圖 epoch。
+- Browser 以同一份地圖資料計算版本資訊並檢查入房版本。線上模式限 M1、匿名開發角色與即時移動，使用 §5.3 的本人預測。測試場的本地模式仍提供七圖走訪。目前進入 void 的角色保持 Death，重新加入會取得新角色。Village 重生 handoff、傳送及同角色重連由 M3.4 接入。
+
 ## 5. Input protocol 與同步
 
 ### 5.1 Client → server
@@ -139,7 +191,7 @@ Client 以同樣30Hz跑 local physics，render 以 `requestAnimationFrame` 自�
 | Message | Payload 核心欄位 | 處理契約 |
 | --- | --- | --- |
 | `InputFrame` | `protocolVersion, connectionEpoch, mapEpoch, seq, moveX, jumpPressed, attackPressed` | 30Hz；moveX 僅 -1／0／1，jump／attack 為單次 edge；不接收 damage／EXP／absolute position |
-| `InteractPortal`／`InteractNpc` | `requestId, mapEpoch, objectId` | 從 server object definition 解析目的地／dialogue |
+| `InteractPortal`／`InteractNpc` | `requestId, mapEpoch, objectId` | Portal 由 Up 按下邊緣發起，server 驗證來源交疊後解析目的地。NPC 由互動按鍵發起。 |
 | `PickupLoot` | `requestId, sessionEpoch, mapEpoch, lootId` | 重新驗證 owner、距離、expiry、容量 |
 | `AllocateAP` | `requestId, sessionEpoch, deltas` | 非負 integers，總額與 invariant 驗證 |
 | `EquipItem`／`UnequipItem`／`ConsumeItem` | `requestId, sessionEpoch, itemInstanceId/slot, expectedCharacterVersion` | version stale 回傳最新 snapshot，不能套用 client bag |
@@ -147,14 +199,14 @@ Client 以同樣30Hz跑 local physics，render 以 `requestAnimationFrame` 自�
 
 Connection 在入房時綁定 account／character，不允許 payload 冒用其他 owner。非 input messages 亦帶 protocolVersion，mutation envelope 帶目前 connectionEpoch；所有欄位做 schema、大小、數值有限性與 rate validation。
 
-Input seq 在 connection epoch 內單調遞增；duplicate／stale epoch 不 consume。Server 每個 tick 每 player 最多 consume 1 frame，不因多送 input 加速世界。Queue 最多6 frames；溢出丟棄舊 frames 到最新一筆並明確 ack 被丟棄序列，jump／attack edge 不補放。連續6 ticks 無新 frame，movement 強制 neutral。Client 不透過 WebSocket SDK reconnect buffer 補送離線 input。
+Input seq 在 connection epoch 內單調遞增。Server 拒絕舊 epoch、已見的序號及超出「連線經過時間換算的 30 Hz ticks 加 80」的過遠序號。每個角色每 tick 依序最多取出一幀，佇列最多 6 幀。第 7 幀到達時捨棄積欠的 6 幀，只保留新幀。重複的最新待處理幀若有不同內容，該位置結案但不套用。取出有效幀或衝突幀時，`ackInputSeq` 同時確認所有更早已略過的序號，已捨棄的 jump／attack edge 不補放。連續 6 ticks 未套用新幀時，既有控制器將水平意圖轉為中立。Death 結案並清除剩餘輸入，停止接受該生命的新幀。離房撤銷連線資格，SDK reconnect buffer 不參與輸入發送。
 
 初始限流：input 40 messages/s、burst80；gameplay mutations 每角色10/s、burst20；party invite cooldown 見 GAME_DESIGN；單 payload 最大4 KiB。另設 account／IP 的 login／register limits，具體由 M7.2 設定。Rate reject 不執行 mutation；惡意重複或無效 payload 可斷線並記錄。
 
 ### 5.2 Server → client
 
-- **Public Schema，10Hz**：serverTick、mapInstanceId、mapContentHash、players 的 transform／public state／HP／MaxHP、monsters 的 IDs／transform／HP／MaxHP／action state。Schema 由 domain projection 建立，不能反向寫 domain；mapEpoch 為個別 character 的 handoff version，不是 room-wide counter。
-- **Self movement checkpoint，10Hz owner-only**：帶 serverTick、該 player 的 mapEpoch／connectionEpoch、`lastProcessedInputSeq`、position、velocity、grounded、jump buffer／coyote、facing、action／hurt timing；不能只校正 x／y 卻漏掉 controller state。與同 tick 的 public projection 對齊。
+- **Public Schema，10 Hz**。房間包含 `serverTick`、`mapId`、`mapInstanceId` 與 `mapContentHash`。角色投影含位置、朝向、狀態、HP／MaxHP、`mapEpoch` 和 `lifeStartedTick`。`mapEpoch` 屬於個別角色。測試怪物投影含 `monsterId`、archetype、腳底中心位置、朝向、巡邏狀態與 HP／MaxHP。以房間 tick 為共用時間軸。Server 建立獨立的 plain DTO，Colyseus 以 ID 更新或移除 Schema 項目。連線 epoch 與本人 checkpoint 仍走 owner channel。
+- **Self movement checkpoint，10 Hz owner-only**。`MovementCheckpoint` 在同 tick 的 public patch 之後由 server 專門發給本人，帶版本、角色、map instance、connection／map epoch、生命開始 tick 及 server tick。`ackInputSeq` 是累積結案邊界，初值為 `null`。控制器自己的 `lastProcessedInputSeq` 和 `lastInputTick` 則記錄實際套用的輸入。完整狀態包含 position、velocity、grounded／void、水平意圖、jump buffer／coyote、facing、locomotion、action 及最近受擊 tick。HP／MaxHP 沿用公開投影。
 - **Reliable visual messages**：attack／damage／death／respawn event，含 eventId 與 tick；純顯示事件可在 reconnect 丟棄，不重播舊 damage numbers。EventId 做短期去重。
 - **Owner-only messages**：character／bag／equipment snapshot、loot snapshot／delta、request result、reward receipt。`privateRevision` 不連續時重新要求完整 snapshot；重新入房／重連一定重建完整 owner view。
 - **Party-only messages**：PartyService 對所有 connected members 發送 revisioned full snapshot，包含同／跨 map 的 member 摘要。不同 party 收不到 invite／roster 私有資料。
@@ -163,17 +215,22 @@ Personal loot／inventory **不放 public room Schema**；預設用 server 指�
 
 ### 5.3 Prediction、reconciliation 與 interpolation
 
-Client 記錄至多120 frames（4秒）的 local input 與 predicted movement。收到 checkpoint 時丟掉已 ack／已丟棄 frames，從 authoritative controller state 重播未 ack input；小誤差只平滑 visual offset，simulation collider 立即以校正後結果運作。大於64 units、map／epoch 改變、Death、transfer 或 buffer overflow 時 hard reset，不把角色 tween 穿牆。
+- **預測**。本人輸入由既有鍵盤／觸控 adapter 取樣，以獨立於 rAF 的固定 30 Hz driver 推進。Client 使用和 server 相同的 `createPlayerController`、Tiled 碰撞幾何及平衡資料。預測只保有移動控制器狀態，送往 server 的只有方向、按下邊緣和序號／epoch。瀏覽器的 HUD 從 server 投影取得 HP，從本地預測取得本人的動作和朝向。
+- **歷史與重播**。本地歷史最多 120 幀，保留 `InputFrame` 完整意圖、序號、地圖／連線 epoch 與本地 tick。Checkpoint 必須屬於本人的 room、角色及連線，server tick 須較新，epoch、生命及 ack 邊界須單調。相同 ack 可出現在更新的 tick，代表 authority 已步進而未結案更多輸入。缺少 ack 欄位的 payload 會被拒絕，`null` 則表示尚未結案。接收時剪除已結案的前綴，從完整 authoritative controller 恢復，在後續固定 ticks 按序重播未確認幀。重播沿用原本的 jump edge，保留 Attack 欄位但沒有戰鬥效果。已送出的輸入不因重播而再次發送。
+- **畫面校正**。重播結果立即成為新的預測碰撞狀態。小於或等於 64 world units 且整段 AABB 路徑無 solid 的誤差，可在 100 ms 內衰減畫面 offset。大誤差、受阻的路徑，或衰減期間失去淨空時，畫面立即使用校正後的位置。Camera 跟隨本人最終的畫面位置。開發房 canvas 容器公布最近 ack、重播筆數、最近一次畫面校正或重設的距離／模式和歷史溢出次數。
+- **重設**。新連線、Death、生命或地圖 epoch 變更清除歷史與畫面 offset。傳送或同圖瞬移可用新地圖 epoch 讓畫面立即定位。切到背景／回前景會暫停預測並從較新的 checkpoint 恢復。歷史達上限後再次取樣會清空並回到最後的權威位置，等較新的 checkpoint 才繼續。斷線或卸載會銷毀該連線的時鐘、歷史與畫面狀態，重新入房使用新的連線 epoch 及序號。
 
-Remote players／monsters 以 serverTick 建立100ms buffer，依 snapshot 插值。最多 extrapolate100ms，超時停在最後狀態並提示連線；不拿 extrapolated 位置算 combat。Server 不回溯舊 client attack time，因此高 latency 的近戰命中體驗需在 M3／M8 實測。
+M3.3 使用公開 `serverTick` 建立遠端角色／怪物的 client presentation buffer。10 Hz 每 100 ms 一個 patch，畫面延遲 100 ms（3 ticks），讓一般短暫的到達抖動有一個 patch 的緩衝。用最近最多 8 筆到達樣本中最小的到達時鐘偏移估計 server tick，畫面時鐘只往前。每個 entity 最多保留 8 筆座標。權威 HP 和成員清單隨最新 patch 更新，座標的視覺插值不回寫權威資料。
 
-Protocol version 或 mapContentHash 不同拒絕入房並要求 reload；固定 balanceVersion 由 server 公告。SDK 已提供的 prediction／fixed loop 能力僅作 adapter 選項，不能讓 framework 接管 domain models 或再跑一份 physics。
+- 重複或逆序 tick 丟棄。有一筆快照時停在該位置。兩筆快照間距最多 6 ticks 可插值（涵蓋漏一個一般 patch）。間距更大、身分／房間／地圖／生命世代變更，或位移超過角色移動上限時，從最新位置開始。離房及怪物移除依最新清單立即釋放各自的 buffer 與 sprite。
+- 缺少後續快照時，遠端活角色可依最後兩筆有效快照的速度，最多外推 100 ms，再停在外推終點直到更新。死亡角色與怪物停在最後權威位置。外推只用於畫面，沒有碰撞或輸入重播。Server 不回溯舊 client attack time，高 latency 的近戰命中體驗留待後續實測。
+- 開發房 canvas 容器記錄最新 snapshot tick、遠端角色的權威與畫面座標及取樣模式、權威怪物投影、可見怪物 sprite ID 及遠端角色 sprite 數量。Chromium smoke 使用這些欄位核對瀏覽器實際取樣與清理。
+
+Server 公告 `protocolVersion`、`balanceVersion` 與 `mapContentHash`。入房須與 server 的三個值一致，差異要求 reload。`schemaVersion` 由各端載入資料時檢查。M0.4 提供版本比對契約，M3.1 將它接入房間驗證。M3.2 的 owner checkpoint 使用 v2，M3.3 更新兩端固定使用的 Schema 並提升到 v3。遊戲只以共用 TypeScript 控制器進行本人預測及權威步進。
 
 ## 6. Map authoring、room 與 transfer
 
-Tiled source 與 JSON export 皆進版控。MVP 支援 finite orthogonal、未壓縮 numeric tile arrays、external tileset resolution、GID flip flags、Tile Layers 與 Object Layers；其餘功能 validator 明確拒絕。Source 修改須重新匯出並驗證 hash。
-
-Object classes：`SolidRect`、`OneWayPlatform`、`Portal`、`PlayerSpawn`、`MonsterSpawn`、`Npc`、`LootFallback`。Portal properties 為 `portalId, destinationMapId, destinationSpawnId, reversePortalId`；spawn 包含唯一 ID、position／facing。Validator 檢查 topology 完整12 directed edges、reverse、bounds、headroom、支撐、monster patrol／flight region、safe loot floor、Village 無怪與 asset license reference。
+七圖 graybox 的 Tiled JSON 同時作為編輯來源與發行匯出。呼叫端提供已解碼的 JSON 與外部 tileset，game-data 載入時驗證每張供應的地圖、manifest 引用和出生幾何，回傳不可變的 tile layers 及 M1.1 相容碰撞資料。完整 graybox 載入另外要求七圖都存在，使 12 個方向的傳送門都有實際目的地。Simulation 使用已驗證的資料，renderer 可使用獨立的 tile layers。Canonical manifest 納入正規化的地圖內容，asset license reference 由 M2.4 驗證。 [Tiled 地圖製作指南](TILED_MAPS.md) · [GAME_DATA](GAME_DATA.md)
 
 MapRoom 持有一份 shared monster simulation，`maxClients=20` 加上 application seat registry 的 reservation 檢查。Connection seat 與 character seat 分開計數，短暫 socket handover 不能多出第21個 character。Room key 為 `(nodeBootId, mapId, instanceSequence)`；map instance 不持久化，personal loot 另有可 rebind durable records。
 
@@ -188,6 +245,10 @@ Transfer state machine：
 PartyService 不隨 map connection dispose；server 以 characterId 找現在的 connection 路由 private／party events。保留 source 的接線與 ticket 消費由 M3.4 驗證，不能簡化成「先 leave 再盲目 join」。
 
 ## 7. Shared monster 與 reward pipeline
+
+M3.3 的 M1 房間各自從已驗證的 `spawn_slime_1` 建立一隻 Slime。使用該點的 Tiled 地板和巡邏區間、archetype 巡邏速度及依等級計算的 MaxHP。純 TypeScript 以 30 Hz tick 推進地面往返，runtime 持有獨立的狀態與穩定 ID。房間內的伺服器測試介面可在 tick 邊界覆寫成測試 HP（MaxHP 的一半，向下取整且最低為 1）並移除 fixture。每種事件每房僅套用一次，且沒有 client message handler。角色離開不移除怪物。房間 dispose 清除怪物與待處理事件，重新建房取得新 ID；加入存活房間則讀取當前的 fixture 狀態。
+
+完整戰鬥與獎勵階段依下列契約交付。
 
 1. Combat applyHit 檢查 monster lifecycle／attackId，寫入 EffectiveDamage 與 first-hit group lock。
 2. 首個 HP≤0 transition 設 `RewardPending`，建立 `deathId = nodeBootId + mapInstanceId + spawnId + generation + encounterId` 的唯一識別（實作可編碼成 UUID／opaque ID），凍結 death-time eligibility／group damage／balanceVersion。
@@ -272,6 +333,20 @@ Camera follow local visual transform，clamp 至 map bounds；tile chunks／spri
 
 Pointer input 轉為與 keyboard 相同的 InputFrame；多指方向／jump／attack 可同時按。使用 pointer capture，處理 cancel／blur／visibility；遊戲控制區停用 browser pan，DOM panels 保留正常捲動。Portrait／background 停止新 input、neutralize，server 不暫停，回前景先 resync 而非快轉幾千個 local ticks。Touch targets ≥2.75rem，safe-area 避開瀏海與 gesture edge。
 
+### 10.1 M1.3 平台測試場
+
+- **生命週期**。React 的 `Playground` 持有 DOM 容器和 HUD。每個容器依序完成 Pixi v8 WebGL 初始化，React StrictMode 的 effect 重跑與快速切換共用同一條初始化順序。卸載會取消 animation frame、解除 resize observer、移除 canvas，並銷毀 stage、繪圖 context 與 WebGL renderer。初始化期間卸載，會在初始化完成後直接釋放資源。瀏覽器無法建立 WebGL 時，React 顯示支援訊息。[PixiJS Application](https://pixijs.com/8.x/guides/components/application)
+- **資料流**。測試場以 rAF 的 monotonic 時間戳呼叫既有 `createFixedTickDriver`，本地世界控制器每步以固定 1/30 秒使用同一套角色模擬。每幀依剩餘 tick 比例，在前後兩個快照間線性插值位置，累積欠步時顯示最新已完成 tick。狀態、朝向與 HP／MP 隨取樣的 tick 切換，Attack 使用 simulation 鎖定的朝向。傳送和重生直接切換至新位置。Pixi 只讀獨立的視覺投影，React HUD 只在畫面所需欄位變更時更新。
+- **鏡頭與縮放**。鏡頭追蹤插值後的角色碰撞盒中心，以 1280 × 720 logical view 等比縮放。各軸獨立限制鏡頭位置。地圖比可見區小時，在該軸置中並留邊。Viewport 或 DPR 變動只更新 canvas backing resolution 和 world container 的渲染轉換。DPR 上限為 2。
+- **替代素材與腳本**。地板、平台和傳送區直接繪自正規化地圖，邊界框和格線供目視判讀。M2.4 以原創 sprite atlas 呈現 Beginner，保留原有幾何圖形供缺圖時使用。腳本透過同一條指令及生命週期路徑展示七種狀態、去程傳送與死亡返村。 [視覺資產管線](ASSETS.md)
+
+### 10.2 M1.4 平台測試場輸入
+
+- **事件與取樣**。Client 的 DOM adapter 以鍵盤 `code` 和 `pointerId` 記錄各自按住的控制。30 Hz tick 才讀取方向與待處理的動作。相同控制的來源先合併，左右同按為中立。一個動作從全放開變為有來源按下時鎖存 edge，正常放開仍保留 tick 之間的短按。每 tick 同種動作最多消費一次。
+- **指令**。互動模式每 tick 送出一筆 `LocalMapInputCommand`，含中立幀、當前生命及地圖標記，`seq` 為當次場景 tick（第一筆為 1）。Simulation 負責指令驗證、移動、傳送及 Guide 互動。Attack edge 接到測試場既有的 15-tick 動作 fixture，Up 與互動各自產生獨立請求。HUD 顯示輔助按鍵輸入。死亡及重生都清除鍵盤、觸控擷取和待送動作。輸入取樣可由後續 transport adapter 使用。
+- **輸入生命週期**。場景聚焦才攔截綁定的鍵，跳過 IME 組字及 Ctrl、Alt、Meta 快捷鍵，忽略重複按下。觸控按鈕各自擷取指標，正常放開、取消或擷取遺失只釋放對應來源。取消或擷取遺失也清除該來源尚未取樣的 edge。場景／視窗失焦、visibility 變更、離開頁面、直橫向切換及卸載會清除所有來源與待處理 edge，並釋放擷取。回復時重新按下才受理。
+- **畫面與模式**。粗略指標裝置以橫向觸控操作，按鈕至少 2.75rem 並預留 safe-area。切成直向時顯示提示並停用輸入。背景期間略過互動場景的經過時間，回前景延續既有 tick。場景模式切換會重新載入場景。兩種模式共用既有 renderer、camera 和插值流程。操作方式見 [README](../README.md#平台測試場操作)。
+
 ## 11. Testing 與 deployment
 
 測試分層：pure unit／property tests（physics、combat、group allocation、AP、packing）、headless multi-actor scenarios（party／simultaneous hits）、network contract／two-browser integration、真 PG transaction／fault tests、mobile 實機與20人 load。RNG／clock 可注入；針對算法 invariants 與外部行為寫測試，避免只複製實作。Vitest 是基線；browser automation／load driver 選型由 M0.3／M3.5 決定，不引入與 task 無關的框架。
@@ -285,6 +360,8 @@ Migration 以受控一次性 job 在 deploy 前執行；測試 restore／forward
 Health 分 liveness／readiness；DB outage、draining 或 tick backlog 可使 readiness false。Graceful shutdown 先停 admission／invite／新 combat，通知倒數，排空 pending durable commands（目標30秒），保留已提交 rows，關閉 connections；超時沒有回覆成功的 intent 依 recovery 規則處理。Party／monsters 不跨 restart 保存。
 
 Observability 包含 process tick p95／p99、room occupancy、reserved seats、input queue、reconciliation distance、DB／reward latency、duplicate／reject／retry counters、pending intents 與 startup recovery。Structured logs 帶 requestId／deathId／characterId（權限控管），不記 password／session／join ticket／loot RNG seed。M8.4 建立實際 runbook／dashboard 與 alert thresholds。
+
+開發房 coordinator 提供目前積欠 ticks、程序累計額外補跑 ticks，以及最近一次積欠從偵測到恢復的毫秒數。首次積欠與恢復各記錄一次。補跑仍以每次喚醒最多 5 ticks 為限，積欠期間繼續拒絕入房並回傳 `WORLD_TICK_BACKLOG`。
 
 ## 12. 決策與官方參考
 

@@ -1,5 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { Playground } from './playground/playground'
+import './playground/playground.css'
 
 const container = document.getElementById('root')
 
@@ -9,8 +11,6 @@ if (!container) {
 
 createRoot(container).render(
   <StrictMode>
-    <main>
-      <h1>Viesma</h1>
-    </main>
+    <Playground />
   </StrictMode>
 )

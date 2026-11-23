@@ -82,7 +82,9 @@ flowchart LR
 - **Deliverables**：typed data、invalid-data diagnostics、version／hash contract、fixture seed。
 - **Acceptance criteria**：負值、非整數、未知 item／map references、overflow 與不一致曲線在 startup／CI 被拒。
 - **Required tests**：EXP table 與公式／總量260000、max AP120、reference integrity、同內容 hash 穩定、不同 balance 拒絕錯版 join 的 contract fixture。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **驗證紀錄（2026-11-23）**：Windows 乾淨副本使用 Node.js 24.22.3／pnpm 11.19.0，frozen install 的鎖檔雜湊一致。Typecheck、lint、format check、dependency boundaries、55 項 Vitest、production build 與 2 項 Chromium smoke 均通過。Fixture 驗證 25 級累計 260000 EXP／120 AP、七圖／12 個 directed portals、引用完整性、hash 正規化及錯版 join。
+- **啟動驗證**：在隔離副本注入不相容 schema 後，production server 以 exit code 1 回報 `UNSUPPORTED_SCHEMA`，在監聽前退出。Vitest 也確認未知 map 會在建立 transport 前拒絕。合法 fixture 透過 dev 入口驗證並回傳 HTTP 200。版本、hash 與編輯方式見 [Game data 載入與版本](GAME_DATA.md)。
 
 ## 3. M1 — Character & Platformer（5 tasks）
 
@@ -95,7 +97,8 @@ flowchart LR
 - **Deliverables**：physics package、geometry fixtures、golden traces。
 - **Acceptance criteria**：30Hz 下高速落下不穿平台，one-way 可由下穿過、向下可靠站立；不同 render FPS 不改位移。
 - **Required tests**：floor／wall／ceiling／corner／thin platform／edge／large velocity／negative coordinate、長時間站立無 drift、重播一致性。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **驗證紀錄（2026-11-23）**：Windows 使用 Node.js 24.22.3／pnpm 11.19.0。`typecheck`、`lint`、`format:check`、`check:boundaries`、82 項 Vitest、production build 與 2 項 Chromium smoke 均通過。新增 27 項物理測試，驗證支援上限速度撞上 1/1024 unit 薄平台、單向平台上下穿越規則、站立 10,000 ticks 無漂移，以及 24／60／144 FPS 模擬與兩秒停頓補跑的完整 60-tick 軌跡一致。座標、速度及 void 契約見 [ARCHITECTURE §4.1](ARCHITECTURE.md#41-m11-平台碰撞契約)。
 
 ### M1.2 — 角色 controller 與狀態機
 
@@ -106,7 +109,9 @@ flowchart LR
 - **Deliverables**：Player model／controller、state transition 規則、input command contract。
 - **Acceptance criteria**：一個 jump edge 只跳一次；空中 attack 保留 physics；Death 優先且不再 consume movement。
 - **Required tests**：held jump、buffer／coyote 邊界、左右相抵、空中 attack、hurt interruption、Death priority、相同 input trace 重播。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **驗證紀錄（2026-11-23）**：Windows 使用 Node.js 24.22.3／pnpm 11.19.0。`typecheck`、`lint`、`format:check`、`check:boundaries`、106 項 Vitest、production build 與 2 項 Chromium shell smoke 均通過。新增 18 項 controller 測試及 6 項平衡資料測試，涵蓋七種 presentation states、跳躍視窗第 3／4 tick 邊界、空中 Attack、Hurt 中斷、Death 優先、指令去重與多人順序。相同輸入在 24／60／144 FPS 取樣與一次補跑 60 ticks 時得到相同 trace，既有 M1.1 golden traces 全數通過。Node 亦透過 production 公開入口驗證一次移動 tick。
+- **驗證範圍**：角色行為以 headless geometry 與 action fixtures 驗證，Chromium smoke 驗證 client shell 與 server health。裝置輸入與互動畫面由 M1.3／M1.4 驗證。指令及步進契約見 [ARCHITECTURE §4.2](ARCHITECTURE.md#42-m12-角色與指令契約)，移動與狀態規則見 [GAME_DESIGN §2](GAME_DESIGN.md#2-角色移動與狀態)。
 
 ### M1.3 — PixiJS rendering 與 camera adapter
 
@@ -117,7 +122,9 @@ flowchart LR
 - **Deliverables**：render adapter、camera、debug overlays 與 client playground。
 - **Acceptance criteria**：renderer 不修改 simulation；unmount 釋放 resources／listeners；viewport resize 不改碰撞座標。
 - **Required tests**：adapter mapping smoke、mount／unmount leak check、camera map bounds、不同 DPR／FPS 的人工 visual check。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **驗證紀錄（2026-11-23）**。Windows 使用 Node.js 24.22.3／pnpm 11.19.0。Frozen offline install、`typecheck`、`lint`、`format:check`、`check:boundaries`、122 項 Vitest、production build 和 5 項 Chromium smoke 均通過。測試驗證七種狀態、實體與單向平台著陸、24／60／144 FPS 取樣重播一致性，以及三輪場景卸載釋放 canvas、resize observer 和 WebGL context。Vite 開發版的 React StrictMode 初次載入只建立一個場景 canvas。
+- **目視驗證**。Windows Chromium Headless 159.0.8154.6 取樣 1280 × 720／DPR 1／25.6 FPS（162 幀）與 667 × 375／DPR 3／35.1 FPS（207 幀）。兩種視窗皆完整顯示場景和 HUD，確認水平跟隨、邊緣限制、小世界置中留邊及 DPR 3 限制為 2。樣本來自單角色測試場的短時段瀏覽器檢查。行動實機與正式場景效能依後續 gate 驗證。生命週期與資料流見 [ARCHITECTURE §10.1](ARCHITECTURE.md#101-m13-平台測試場)。
 
 ### M1.4 — Desktop 與 mobile input
 
@@ -128,7 +135,9 @@ flowchart LR
 - **Deliverables**：input adapters、touch overlay、portrait／background behavior。
 - **Acceptance criteria**：移動＋jump／attack 可多指操作；開啟面板不誤觸戰鬥；切出 app 不持續卡鍵。
 - **Required tests**：input edge／neutralization unit tests、keyboard focus check、667×375 touch smoke、pointercancel／rotation／resize 人工驗證。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **驗證紀錄（2026-11-23）**。Windows 使用 Node.js 24.22.3／pnpm 11.19.0。`typecheck`、`lint`、`format:check`、`check:boundaries`、135 項 Vitest、production build 和 7 項 Chromium smoke 均通過。測試包含 30 Hz 取樣與序號、鍵盤焦點與輸入欄、多指移動加跳躍或攻擊，以及中斷後回到中立。原有腳本重播與 simulation golden traces 通過。
+- **人工驗證**。使用有視窗的 Chromium 159.0.8154.6 和 Chromium 觸控模擬，在 667 × 375 橫向確認操作區與 `pointercancel`，在 375 × 667 直向確認旋轉提示與輸入清理，並回到 640 × 360 橫向確認版面、按鈕恢復及擷取中斷後停止移動。行動實機矩陣由 M8.2 驗證。操作與模式見 [README](../README.md#平台測試場操作)。
 
 ### M1.5 — HP／MP、Death 與安全區 respawn fixture
 
@@ -139,7 +148,9 @@ flowchart LR
 - **Deliverables**：生命週期 controller、HUD、debug damage harness。
 - **Acceptance criteria**：HP=0 後3秒回 fixture hub，無重複 body／respawn；MP 不為負；Hurt 期間操作符合規則。
 - **Required tests**：simultaneous damage／i-frames、Death 不能 attack、重複 Death event、void fall、respawn timer；M2.2 需替換為真正 Village spawn。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **驗證紀錄（2026-11-24）**。Windows 使用 Node.js 24.22.3／pnpm 11.19.0。`typecheck`、`lint`、`format:check`、`check:boundaries`、152 項 Vitest 與 production build 均通過。測試涵蓋 6 tick Hurt、30 tick 傷害免疫、HP／MP 邊界、void 與重複死亡、D + 90 恢復同一 body、舊生命指令失效、固定步進重播與 M1.1 golden traces。生命週期與資料契約見 [ARCHITECTURE §4.3](ARCHITECTURE.md#43-m15-hpmp-與重生契約)。
+- **瀏覽器驗證**。Chromium 159.0.8154.6 的 7 項 smoke 通過。2567 已由開發伺服器占用，smoke 使用正式版 client preview 並重用既有 health endpoint，正式版 server 另在隔離的本機埠驗證 HTTP 200。另在 Chromium 開發版操作傷害按鈕，確認 HP 50 → 40 → 0、倒地、清除按住的控制，及回安全區時補滿 HP／MP。觸控使用 667 × 375 橫向模擬。正式建置有 Vite 的 chunk 大小提示。
 
 ## 4. M2 — World & Maps（5 tasks）
 
@@ -152,7 +163,9 @@ flowchart LR
 - **Deliverables**：map authoring guide、import tool、normalized immutable map data、validator。
 - **Acceptance criteria**：unsupported format 明確拒絕；spawn 有支撐／headroom；portal target／reverse reference／collision 有效。
 - **Required tests**：missing object／duplicate ID／broken tileset／GID flip／one-way geometry／invalid spawn／out-of-bounds 與 content hash fixtures。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **驗證紀錄（2026-11-24）**。Windows 使用 Node.js 24.22.3／pnpm 11.19.0。`typecheck`、`lint`、`format:check`、`check:boundaries`、199 項 Vitest 與 production build 均通過。47 項 Tiled 測試涵蓋格式拒絕、ID、外部 atlas、GID、出生支撐和淨空、portal 引用與碰撞、M1.1 落地行為及 hash 相容性。CLI 以七圖 manifest 驗證暫存地圖，錯誤 atlas 在載入階段以欄位路徑拒絕。製作與匯出方式見 [Tiled 地圖製作指南](TILED_MAPS.md)。
+- **瀏覽器驗證**。預設 2567 已由開發伺服器占用，改用暫存 Playwright 設定，在 25821 啟動本次正式建置。並行 smoke 的觸控案例曾逾時，改用單一 worker 後 7 項 Chromium smoke 全數通過。Vite 建置仍有 chunk 大小提示。完整地圖與通行驗證由 M2.2／M2.3 接續。
 
 ### M2.2 — Village／M1 graybox 與 portal 基礎
 
@@ -162,8 +175,11 @@ flowchart LR
 - **Dependencies**：M2.1、M1.5。
 - **Deliverables**：兩 maps、`spawn_respawn`、portal pair、local transition controller。
 - **Acceptance criteria**：兩圖可雙向走訪，spawn 無碰撞／bounce，Village 無怪且無傷害，death 回真正 Village。
-- **Required tests**：portal overlap／cooldown／invalid destination／spawn protection／failed transfer；兩圖 keyboard／touch walkthrough。
-- **Status**：NOT_STARTED
+- **Required tests**：portal overlap／Up 按下邊緣／持續按住與重新按下／過期或重複輸入／invalid destination／spawn protection／failed transfer。兩圖 keyboard／touch walkthrough。
+- **Status**：DONE
+- **驗證紀錄（2026-11-24）**。Windows、Node.js 24.22.3、pnpm 11.19.0。`validate:maps` 驗證兩圖的 11 個 collider、3 個 spawn 與雙向 portal。預設載入和以反向順序指定 JSON 都得到 SHA-256 `08b5c271bb8f013bf09aaff90e933ac83660209bf0e1e0cfea4994422db798ef`。`typecheck`、`lint`、`format:check`、`check:boundaries`、`test`（214 項）及 `build` 通過。Vite 仍有 chunk 大小提示。
+- **瀏覽器驗證**。Chromium 159.0.8154.6 的 9 項 smoke 通過。桌面鍵盤與 667 × 375 橫向觸控模擬都完成雙向走訪，通過 Up 邊緣、畫布重用、鏡頭跟隨及死亡返村檢查。2567 已由開發伺服器占用，使用 `VIESMA_SERVER_PORT=25822` 與單 worker 驗證正式建置。
+- **製作限制**。兩圖以原創矩形物件圖層作為 graybox。專案匯入器已驗證來源 JSON。驗證環境封鎖 Tiled 安裝套件解包，編輯器重新匯出未實跑。 [地圖與匯出流程](TILED_MAPS.md#七圖-graybox)
 
 ### M2.3 — 七圖 topology 與完整 graybox
 
@@ -174,7 +190,11 @@ flowchart LR
 - **Deliverables**：七 map exports／source、manifest、portal／spawn matrix。
 - **Acceptance criteria**：topology 僅有規格六條雙向邊；各圖有安全出入口，所有 map 可從 Village 到達並返回。
 - **Required tests**：graph reachability、12 directed edges、missing reverse／bad spawn validator、七圖 platform／void walkthrough。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **資料驗收（2026-11-24）**。七張 Tiled JSON 通過 `validate:maps`，共 51 個 collider、13 個玩家生成點、12 個傳送門、68 個怪物生成標記與 5 個 Bat 掉落備援點。驗證六條雙向連線、反向引用、生成點支撐和淨空。內建載入、明確指定檔案及反轉檔案順序均得到 SHA-256 `6aa7e4a56492d94fac28301d3b3c62a4fefeaea2283fb9b97ee29974b7a1b974`。 [地圖來源與地形](TILED_MAPS.md#七圖-graybox) · [Portal 與 spawn 矩陣](GAME_DESIGN.md#11-portal-與-spawn-契約)
+- **移動與生命週期驗收**。以 30 Hz Beginner 輸入驗證 32 條出生點至出口路線、M2–M6 的踏面落地、M1 單向橋及 M6 裂隙雙向通行。七圖 12 次換圖可決定性重播。六張戰鬥圖死亡後都於第 90 tick 返回 `village/spawn_respawn` 並補滿 HP／MP，舊 mapEpoch 的指令無效。另驗證 M1、M6 墜落返村和 Village 安全區。
+- **實際檢查**。Windows、Node.js 24.22.3、pnpm 11.19.0。 `typecheck`、`lint`、`format:check`、`check:boundaries`、`test`（266 項）和 `build` 通過。Chromium 159.0.8154.6 的 10 項 production smoke 通過，使用 client preview 4173、隔離 server 25823 和單一 worker。桌面鍵盤走完全部 12 個傳送方向，確認抵達鏡頭、角色位置與畫布重用。667 × 375 橫向觸控模擬完成 Village 與 M1、M2 的往返。
+- **驗證限制**。Tiled 編輯器未安裝，執行環境政策封鎖官方 MSI 的管理式解包，因此編輯器開啟及重新匯出未驗證。正式版通過建置，Vite 仍提示主 chunk 超過 500 kB。
 
 ### M2.4 — 原創／授權 asset pipeline
 
@@ -185,7 +205,12 @@ flowchart LR
 - **Deliverables**：資產與來源／授權紀錄、lazy-loading manifest、sprite/render dimensions。
 - **Acceptance criteria**：無受保護 MapleStory 素材；visual size 不決定 collision；首 Village 必要壓縮資產目標≤5MiB。
 - **Required tests**：manifest reference／license check、animation coverage、asset load failure／fallback、render visual QA 與 cold-load size measurement。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **交付（2026-11-24）**。三張可重生的原創 PNG 圖集和七個視覺 ID，涵蓋 Beginner 七狀態、三種怪物、圖塊、Guide 與掉落袋。Vite 驗證來源、摘要、授權、圖框與 Tiled 引用，再發布帶摘要的圖集及署名。Pixi 依 ID 延遲載入，碰撞與腳底定位沿用 simulation 的 24 × 48 world-unit body。 [資產工作流程](ASSETS.md) · [原創來源紀錄](../content/assets/provenance/graybox.md)
+- **建置及資料驗收**。Windows、Node.js 24.22.3、pnpm 11.19.0。 `validate:assets`、`validate:maps`、`typecheck`、`lint`、`format:check`、`check:boundaries`、`test`（296 項）及 `build` 通過。兩次正式 client 建置的 15 份檔案 SHA-256 完全相同。七圖 hash 為 `6aa7e4a56492d94fac28301d3b3c62a4fefeaea2283fb9b97ee29974b7a1b974`。
+- **瀏覽器驗收**。Chromium 159.0.8154.6、WebGL SwiftShader、client preview 4173、server 25824、單一 worker。最終 `test:smoke` 12 項通過，包含桌面鍵盤、667 × 375 觸控模擬及全部 12 次換圖。每次抵達後只追蹤到 Beginner 與當前地圖的 ImageBitmap／WebGL texture，卸載後皆為 0。檢視 Village、Forest Entrance 及缺圖畫面截圖。開發伺服器實際省略選用的 Village PNG 時回傳 404，Beginner 圖集仍可載入，鍵盤可操作。正式版故障注入也覆蓋解碼失敗和圖形 fallback。
+- **冷載入驗收**。停用瀏覽器快取後，首個 Village 載入 12 份資源。以 HTTP 回應的 HTML／JS／CSS 內容重新計算 gzip，加上 PNG 實際檔案大小，共 252,891 bytes（約 247 KiB），其中圖集 1,537 bytes。戰鬥圖集延後至換圖下載。
+- **驗證限制**。交付為原創 graybox 視覺樣本。第三方授權路徑用合成資料驗證，未引入第三方美術。實機與長時間記憶體量測仍由 M8.2 處理。Vite 仍提示主 chunk 超過 500 kB。
 
 ### M2.5 — Guide NPC 與世界 gate
 
@@ -196,7 +221,11 @@ flowchart LR
 - **Deliverables**：NPC dialogue data／UI、world walkthrough record、map／license validation report。
 - **Acceptance criteria**：keyboard／touch 可開關對話，介紹基本循環；七圖與12 portals 皆經實際走訪。
 - **Required tests**：距離／未知 NPC 拒絕、focus 不誤觸、reachable graph CI、desktop／mobile world smoke。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **驗證紀錄（2026-11-24）**。Windows、Node.js 24.22.3、pnpm 11.19.0。`validate:maps`、`validate:assets`、`typecheck`、`lint`、`format:check`、`check:boundaries`、`test`（312 項）及 `build` 通過。Vitest 涵蓋 96 units 含邊界、角色狀態、NPC／地圖 ID、舊生命與舊 epoch、重複與衝突序號、舊對話關閉請求、死亡及換圖中斷、確定性重播、傳送失敗與七圖可達性。
+- **七圖與資產驗證**。CLI 驗證 7 張地圖、12 個方向傳送門、13 個角色出生點與 Village `npc_guide`。`mapContentHash` 為 `ee0a09e481b4d09daa529cf85a08cb7764685edf809f348a6c2dc62dbe94d5aa`。資產驗證通過 3 張 `project-owned` 原創圖集與 7 個 sprite 的來源、圖框、授權紀錄及發行署名。 [地圖契約](TILED_MAPS.md) · [資產管線](ASSETS.md)
+- **瀏覽器走訪**。Chromium 159.0.8154.6／WebGL SwiftShader，client preview 4173，server 25825。桌面以鍵盤走完 Village → M1 → M5 → M1 → Village → M2 → M6 → M2 → Village → M3 → Village → M4 → Village，每次抵達驗證地圖、鏡頭及畫布重用，卸載後追蹤的圖集 ImageBitmap 與 WebGL texture 均為 0。桌面確認 Guide sprite、E 開關、面板焦點隔離及 W 傳送。667 × 375 觸控模擬確認完整對話可讀、觸控開關與關閉按鈕，並走訪 Village、M1、M2。預設時限的一輪有腳本播放與世界走訪逾時，最終以 `pnpm run test:smoke --workers=1 --timeout=180000` 完成 14 項。 [Guide 驗收](../tests/smoke/guide.spec.mjs) · [七圖走訪](../tests/smoke/world.spec.mjs)
+- **限制**。HP 藥水與組隊屬 Guide 教學內容，對應玩法由後續任務接入。行動實機與長時間資源量測留待 M8.2。Vite 仍對約 594 kB 的主 chunk 提示大小警告。
 
 ## 5. M3 — Early Multiplayer Vertical Slice（5 tasks）
 
@@ -209,7 +238,11 @@ flowchart LR
 - **Deliverables**：server／client network adapters、public state projection、headless room harness。
 - **Acceptance criteria**：兩 client 入同 M1、看見彼此；每 tick 只 step 一次；simulation 不引入 Colyseus；21st seat 不進滿 room。
 - **Required tests**：join／leave／seat reservation races、invalid payload／protocol mismatch、scheduler double-step／catch-up、兩 browser movement smoke。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **驗證紀錄（2026-11-24）**。Windows、Node.js 24.22.3、pnpm 11.19.0。暫用 server port 25825，避開已占用的 2567。`validate:assets`、`validate:maps`、`typecheck`、`lint`、`format:check`、`check:boundaries`、`test`（319 項）與 `build` 均通過。開發用 TypeScript 入口的健康檢查回傳 HTTP 200。
+- **房間與排程**。實際 WebSocket 測試覆蓋同房公開狀態、第二房隔離、版本不符、身份與欄位驗證、斷線清理、21st seat 拒絕、一次性預留消費與逾時回收。Headless harness 驗證單一 30 Hz driver、同 tick 不重跑、每次最多補 5 ticks、規律與延遲喚醒的重播一致。 [房間整合](../apps/server/test/map-room.test.mjs) · [Headless harness](../apps/server/test/map-runtime.test.mjs) · [實作契約](ARCHITECTURE.md#46-m31-m1-開發房)
+- **瀏覽器驗收**。Chromium 159.0.8154.6／SwiftShader。兩個獨立工作階段在 M1 以桌面鍵盤與 667 × 375 橫向觸控移動，驗證同房角色與對方離房後的畫面更新。預設六工人並行執行時，14 項通過，多人案例觸發 `WORLD_TICK_BACKLOG` 入房保護。`pnpm run test:smoke --workers=1 --timeout=180000` 完整通過 15 項。 [兩瀏覽器驗收](../tests/smoke/multiplayer.spec.mjs)
+- **限制**。開發角色限單次連線及 M1，畫面依 10 Hz patch 更新。實機、高延遲及持續負載的表現留待後續驗證。Vite 主 chunk 約 595 kB，仍有大小提示。
 
 ### M3.2 — Local prediction 與 server reconciliation
 
@@ -220,7 +253,11 @@ flowchart LR
 - **Deliverables**：prediction controller、input history、correction diagnostics。
 - **Acceptance criteria**：client 多送 frame 不加速；stale input 不生效；重連／Death／map switch 清 history；不因 correction 穿牆。
 - **Required tests**：duplicate／stale／future burst／overflow、150ms RTT／jitter、edge jump／attack 重播、render FPS 獨立、wall correction trace。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **驗證紀錄（2026-11-24）**。Windows、Node.js 24.18.0、pnpm 11.19.0。預設連接埠 2567 已占用，smoke 使用 25825。`validate:assets`、`validate:maps`、`typecheck`、`lint`、`format:check`、`check:boundaries`、`test`（332 項）及 `build` 均通過。pnpm 回報 Node 低於專案指定的 24.22.3，Vite 發出約 595 kB 主 chunk 的大小提示。
+- **輸入與校正**。有界佇列、過遠序號、stale／duplicate／衝突幀、Death／epoch／連線清理及 owner-only checkpoint 都有測試。75 ms 單向延遲與最多 ±24 ms 單向 jitter 以注入時鐘重現。兩種渲染頻率的輸入與最終狀態一致，涵蓋 coyote／buffered jump、Attack edge 保留及 solid 阻隔的校正路徑。 [本機預測測試](../apps/client/test/local-prediction.test.mjs) · [伺服器步進測試](../apps/server/test/map-runtime.test.mjs) · [WebSocket 房間測試](../apps/server/test/map-room.test.mjs) · [同步契約](ARCHITECTURE.md#53-predictionreconciliation-與-interpolation)
+- **瀏覽器驗收**。Chromium 159.0.8154.6／SwiftShader。雙瀏覽器在 M1 同房，用桌面鍵盤及 667 × 375 橫向觸控驗證封包送達前的移動、恢復傳輸後超過 64 world units 的權威校正、同伴離房、連線及畫布清理，兩頁皆無未捕捉的執行期例外。首次預設六工人執行時有 14 項通過，多人案例入場逾時且期間記錄到 tick 積欠。增加多人案例的就緒等待時間後，`pnpm run test:smoke --workers=1 --timeout=180000` 及預設六工人的 `pnpm run test:smoke` 重跑均通過 15 項。 [多人 smoke](../tests/smoke/multiplayer.spec.mjs)
+- **限制**。Wire protocol v2 需搭配同版本的 client 與 server。線上測試限 M1 的單次連線開發角色，其他角色使用最新的公開 patch。實體裝置與長時間負載留給後續驗證。
 
 ### M3.3 — Remote interpolation 與共享怪物 fixture
 
@@ -231,7 +268,11 @@ flowchart LR
 - **Deliverables**：remote entity view、same monster ID／HP fixture、snapshot diagnostics。
 - **Acceptance criteria**：兩 browser 看見同一隻怪，測試 HP／delete 同步；client 不各自 spawn 或跑 authoritative AI。
 - **Required tests**：snapshot gaps／stall／full rejoin、entity add／remove、event de-dup、interpolation bounds、兩 client HP 一致。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **驗證紀錄（2026-11-24）**。Windows、Node.js 24.18.0、pnpm 11.19.0。`validate:assets`（7 個 sprite）、`validate:maps`（7 張圖）、`typecheck`、`lint`、`format:check`、`check:boundaries`、`test`（348 項）及 `build` 均通過。pnpm 提示 Node 低於專案指定的 24.22.3，Vite 提示主 chunk 約 596 kB。
+- **同步與隔離**。遠端畫面用 10 Hz patch、100 ms 延遲與每 entity 8 筆歷史。缺一筆時可插值，活角色最多外推 100 ms。測試覆蓋 jitter、stall、舊 tick、瞬移／世代切換、離房與緩衝清理。既有本人 150 ms RTT 回歸通過。M1 房間各有從驗證資料建立的巡邏 Slime；測試覆蓋固定 tick 重播、HP／移除去重、伺服器投影、偽造 client 訊息拒絕及跨房隔離。 [同步契約](ARCHITECTURE.md#53-predictionreconciliation-與-interpolation) · [房間測試](../apps/server/test/map-room.test.mjs)
+- **Chromium 驗收**。Chromium 159.0.8154.6（啟用 SwiftShader），預設 2567 已占用，`pnpm run test:smoke` 使用 25825。預設 6 workers 完整重跑通過 16 項。雙頁以各自收到的相同 server tick 比對怪物 ID／位置，注入 45 ms 有序下行延遲並在多個 patch 之間驗證遠端中間位置。離房移除同伴 sprite，Slime 留在房內，重入取得相同 ID。伺服器測試事件令兩頁觀察到相同的 HP 71 → 35 與後續 sprite 移除。既有桌面鍵盤與 667 × 375 橫向觸控回歸通過，兩頁各維持一個 canvas，無未捕捉的執行期例外。前兩輪修正了固定畫面取樣頻率與兩頁同步讀取的測試假設。 [多人 smoke](../tests/smoke/multiplayer.spec.mjs)
+- **限制**。公開 Schema 升到 protocol v3，client 與 server 需配對更新。遠端外推僅呈現座標，斷訊或地形邊緣可有短暫視覺偏差。多人驗證限 M1 開發房與單隻地面巡邏 fixture。平行 smoke 曾觀察到短暫 tick backlog；實機與長時間負載另由後續任務驗證。
 
 ### M3.4 — Cross-room transfer 與基礎 reconnect
 

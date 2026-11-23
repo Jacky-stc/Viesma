@@ -3,13 +3,19 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "pnpm --filter @viesma/simulation... --filter @viesma/network-colyseus... run build && vite --host 127.0.0.1",
     "preview": "vite preview --host 127.0.0.1 --strictPort",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
     "build": "vite build"
   },
   "dependencies": {
     "@colyseus/sdk": "0.18.10",
+    "@viesma/domain": "workspace:*",
+    "@viesma/game-data": "workspace:*",
+    "@viesma/network-colyseus": "workspace:*",
+    "@viesma/physics": "workspace:*",
+    "@viesma/protocol": "workspace:*",
+    "@viesma/simulation": "workspace:*",
     "pixi.js": "8.23.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
