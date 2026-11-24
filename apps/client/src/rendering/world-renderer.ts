@@ -26,7 +26,12 @@ export interface WorldRenderer {
   ): void
 }
 
-export async function createWorldRenderer(host: HTMLElement, body: PlayerSize, signal: AbortSignal): Promise<WorldRenderer | undefined> {
+export async function createWorldRenderer(
+  host: HTMLElement,
+  body: PlayerSize,
+  signal: AbortSignal,
+  diagnostics = false
+): Promise<WorldRenderer | undefined> {
   if (signal.aborted) return undefined
   const app = new Application()
   let observer: ResizeObserver | undefined
@@ -79,8 +84,10 @@ export async function createWorldRenderer(host: HTMLElement, body: PlayerSize, s
       peerViews.clear()
       monsters.destroy({ children: true })
       monsterViews.clear()
-      delete host.dataset.monsterSprites
-      delete host.dataset.peerSprites
+      if (diagnostics) {
+        delete host.dataset.monsterSprites
+        delete host.dataset.peerSprites
+      }
       entityAssets.destroy()
     }
     terrain.addChild(monsters, peers, player.root)
@@ -134,7 +141,7 @@ export async function createWorldRenderer(host: HTMLElement, body: PlayerSize, s
           }
         }
         if (frame.monsters) {
-          const visibleIds: string[] = []
+          const visibleIds: string[] | undefined = diagnostics ? [] : undefined
           for (const [id, monster] of frame.monsters) {
             let view = monsterViews.get(id)
             if (!view) {
@@ -142,10 +149,12 @@ export async function createWorldRenderer(host: HTMLElement, body: PlayerSize, s
               monsterViews.set(id, view)
               monsters.addChild(view.root)
             }
-            if (view.draw(monster)) visibleIds.push(id)
+            if (view.draw(monster)) visibleIds?.push(id)
           }
-          const spriteIds = visibleIds.join(',')
-          if (host.dataset.monsterSprites !== spriteIds) host.dataset.monsterSprites = spriteIds
+          if (visibleIds) {
+            const spriteIds = visibleIds.join(',')
+            if (host.dataset.monsterSprites !== spriteIds) host.dataset.monsterSprites = spriteIds
+          }
         }
         for (const [id, view] of peerViews) {
           if (!frame.peers?.has(id)) {
@@ -162,7 +171,10 @@ export async function createWorldRenderer(host: HTMLElement, body: PlayerSize, s
           }
           view.draw(peer)
         }
-        if (frame.peers && host.dataset.peerSprites !== String(peerViews.size)) host.dataset.peerSprites = String(peerViews.size)
+        if (diagnostics && frame.peers) {
+          const spriteCount = String(peerViews.size)
+          if (host.dataset.peerSprites !== spriteCount) host.dataset.peerSprites = spriteCount
+        }
         player.draw(frame)
         app.render()
       },

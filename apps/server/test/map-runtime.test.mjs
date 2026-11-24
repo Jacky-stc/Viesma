@@ -150,12 +150,19 @@ test('binds command ownership to the live connection and drops pending input on 
   expect(first.receive(alpha, frame(a, 2), 240)).toBe(false)
   expect(first.receive(alpha, frame(a, 3), 240)).toBe(true)
   first.leave(alpha)
+  expect(first.checkpoint(alpha)).toBeUndefined()
   expect(first.receive(alpha, frame(a, 4), 240)).toBe(false)
   const rejoined = first.join(alpha, 240)
   expect(rejoined.characterId).not.toBe(a.characterId)
+  expect(rejoined.connectionEpoch).not.toBe(a.connectionEpoch)
   expect(first.receive(alpha, frame(a, 5), 240)).toBe(false)
   wake(300)
   expect(first.snapshot().players).toEqual([{ ...spawn, characterId: rejoined.characterId }])
+  expect(first.checkpoint(alpha)).toMatchObject({
+    ...rejoined,
+    ackInputSeq: null,
+    controller: { movement: { lastProcessedInputSeq: null } },
+  })
   world.disposeRoom(first)
   expect(first.snapshot().players).toEqual([])
   expect(first.join(alpha, 300)).toBeUndefined()
@@ -197,7 +204,7 @@ test('bounds ingress bursts and refills from the injected clock', () => {
   world.disposeRoom(room)
 })
 
-test('drops a six-frame burst on overflow, acknowledges the skipped edges, and moves only once per tick', () => {
+test('preserves a jump in a seven-frame burst, settles the evicted gap, and applies only one frame per tick', () => {
   const { world, wake } = harness()
   const room = world.createRoom()
   const alpha = {}
@@ -205,21 +212,157 @@ test('drops a six-frame burst on overflow, acknowledges the skipped edges, and m
   const a = room.join(alpha, 0)
   const b = room.join(bravo, 0)
   wake(1000 / 30)
-  for (let seq = 1; seq <= 6; seq++) {
-    expect(room.receive(alpha, frame(a, seq, { jumpPressed: true, attackPressed: true }), 40)).toBe(true)
-  }
-  expect(room.receive(alpha, frame(a, 7), 40)).toBe(true)
-  expect(room.receive(bravo, frame(b, 1), 40)).toBe(true)
+  const jump = { moveX: -1, jumpPressed: true }
+  expect(room.receive(alpha, frame(a, 1, jump), 40)).toBe(true)
+  for (let seq = 2; seq <= 6; seq++) expect(room.receive(alpha, frame(a, seq), 40)).toBe(true)
+  expect(room.receive(alpha, frame(a, 7, { moveX: 0 }), 40)).toBe(true)
+  expect(room.receive(bravo, frame(b, 1, jump), 40)).toBe(true)
   expect(room.checkpoint(alpha).ackInputSeq).toBeNull()
   wake((1000 * 2) / 30)
   expect(room.checkpoint(alpha)).toMatchObject({
-    ackInputSeq: 7,
-    controller: { action: { kind: 'none' }, physics: { grounded: true }, movement: { lastProcessedInputSeq: 7 } },
+    ackInputSeq: 2,
+    controller: { physics: { grounded: false }, locomotion: 'jump', movement: { moveX: -1, lastProcessedInputSeq: 1 } },
   })
-  expect(room.checkpoint(alpha).controller.position).toEqual(room.checkpoint(bravo).controller.position)
-  expect(room.receive(alpha, frame(a, 6, { jumpPressed: true }), 70)).toBe(false)
-  wake(100)
-  expect(room.checkpoint(alpha).controller).toMatchObject({ physics: { grounded: true }, movement: { lastProcessedInputSeq: 7 } })
+  expect(room.checkpoint(alpha).controller).toEqual(room.checkpoint(bravo).controller)
+  expect(room.receive(alpha, frame(a, 2, jump), 70)).toBe(false)
+  for (let seq = 3; seq <= 7; seq++) {
+    wake((1000 * seq) / 30)
+    expect(room.checkpoint(alpha)).toMatchObject({ ackInputSeq: seq, controller: { movement: { lastProcessedInputSeq: seq } } })
+    expect(room.checkpoint(alpha).controller.position.y).toBe(room.checkpoint(bravo).controller.position.y)
+  }
+  expect(room.checkpoint(alpha).controller.movement.moveX).toBe(0)
+  world.disposeRoom(room)
+})
+
+test('rejects a tail behind six valid edges and settles it after draining without further input', () => {
+  const { world, wake } = harness()
+  const room = world.createRoom()
+  const connection = {}
+  const binding = room.join(connection, 0)
+  wake(1000 / 30)
+  for (let seq = 1; seq <= 6; seq++) {
+    expect(room.receive(connection, frame(binding, seq, { attackPressed: true, jumpPressed: seq === 1 }), 40)).toBe(true)
+  }
+  const rejected = frame(binding, 7, { jumpPressed: true })
+  expect(room.receive(connection, rejected, 40)).toBe(false)
+  for (let seq = 1; seq <= 5; seq++) {
+    wake((1000 * (seq + 1)) / 30)
+    expect(room.checkpoint(connection)).toMatchObject({ ackInputSeq: seq, controller: { movement: { lastProcessedInputSeq: seq } } })
+  }
+  wake((1000 * 7) / 30)
+  expect(room.checkpoint(connection)).toMatchObject({ ackInputSeq: 7, controller: { movement: { lastProcessedInputSeq: 6 } } })
+  expect(room.receive(connection, rejected, 240)).toBe(false)
+  wake((1000 * 8) / 30)
+  expect(room.checkpoint(connection)).toMatchObject({ ackInputSeq: 7, controller: { movement: { lastProcessedInputSeq: 6 } } })
+  world.disposeRoom(room)
+})
+
+test('evicts a conflicted edge before a valid edge when all pending frames carry edges', () => {
+  const { world, wake } = harness()
+  const room = world.createRoom()
+  const connection = {}
+  const binding = room.join(connection, 0)
+  wake(1000 / 30)
+  for (let seq = 1; seq <= 6; seq++) expect(room.receive(connection, frame(binding, seq, { attackPressed: true }), 40)).toBe(true)
+  expect(room.receive(connection, frame(binding, 6, { attackPressed: true, jumpPressed: true }), 40)).toBe(false)
+  expect(room.receive(connection, frame(binding, 7, { jumpPressed: true }), 40)).toBe(true)
+  expect(room.receive(connection, frame(binding, 6, { attackPressed: true }), 40)).toBe(false)
+  wake(200)
+  expect(room.checkpoint(connection)).toMatchObject({
+    ackInputSeq: 6,
+    controller: { physics: { grounded: true }, movement: { lastProcessedInputSeq: 5 } },
+  })
+  wake((1000 * 7) / 30)
+  expect(room.checkpoint(connection)).toMatchObject({
+    ackInputSeq: 7,
+    controller: { locomotion: 'jump', movement: { lastProcessedInputSeq: 7 } },
+  })
+  world.disposeRoom(room)
+})
+
+test('uses the original receipt time at the inclusive cutoff and expires whole frames before catch-up', () => {
+  const { world, wake } = harness()
+  const room = world.createRoom()
+  const exact = {}
+  const duplicate = {}
+  const conflict = {}
+  const a = room.join(exact, 0)
+  const b = room.join(duplicate, 0)
+  const c = room.join(conflict, 0)
+  wake(1000 / 30)
+  const jump = { jumpPressed: true }
+  expect(room.receive(duplicate, frame(b, 1, jump), 99)).toBe(true)
+  expect(room.receive(conflict, frame(c, 1, jump), 99)).toBe(true)
+  expect(room.receive(exact, frame(a, 1, jump), 100)).toBe(true)
+  expect(room.receive(duplicate, frame(b, 1, jump), 298)).toBe(false)
+  expect(room.receive(conflict, frame(c, 1, { ...jump, moveX: -1 }), 299)).toBe(false)
+  expect(room.receive(conflict, frame(c, 2, { moveX: 0 }), 299)).toBe(true)
+  for (const connection of [exact, duplicate, conflict]) expect(room.checkpoint(connection).ackInputSeq).toBeNull()
+  wake(300)
+  expect(room.snapshot().serverTick).toBe(6)
+  expect(world.canAdmit()).toBe(false)
+  expect(room.checkpoint(exact)).toMatchObject({ ackInputSeq: 1, controller: { locomotion: 'jump', movement: { lastInputTick: 2 } } })
+  expect(room.checkpoint(duplicate)).toMatchObject({
+    ackInputSeq: 1,
+    controller: { physics: { grounded: true }, movement: { moveX: 0, lastProcessedInputSeq: null, lastInputTick: null } },
+  })
+  expect(room.checkpoint(conflict)).toMatchObject({
+    ackInputSeq: 2,
+    controller: { physics: { grounded: true }, movement: { moveX: 0, lastProcessedInputSeq: 2, lastInputTick: 2 } },
+  })
+  expect(room.receive(duplicate, frame(b, 1, jump), 300)).toBe(false)
+  wake(300)
+  expect(world.canAdmit()).toBe(true)
+  expect(room.checkpoint(duplicate).controller.physics.grounded).toBe(true)
+  world.disposeRoom(room)
+})
+
+test('admits a fresh edge when all six queued edges have expired before ingress', () => {
+  const { world, wake } = harness()
+  const room = world.createRoom()
+  const connection = {}
+  const binding = room.join(connection, 0)
+  wake(1000 / 30)
+  for (let seq = 1; seq <= 6; seq++) expect(room.receive(connection, frame(binding, seq, { attackPressed: true }), 40)).toBe(true)
+  expect(room.receive(connection, frame(binding, 7, { jumpPressed: true }), 241)).toBe(true)
+  wake(241)
+  expect(room.checkpoint(connection)).toMatchObject({
+    ackInputSeq: 7,
+    controller: { locomotion: 'jump', movement: { lastInputTick: 2, lastProcessedInputSeq: 7 } },
+  })
+  world.disposeRoom(room)
+})
+
+test('bounds unresolved inputs and drains the terminal frontier after sustained ingress above the tick rate', () => {
+  const { world, wake } = harness()
+  const room = world.createRoom()
+  const connection = {}
+  const binding = room.join(connection, 0)
+  const accepted = []
+  let seq = 0
+  let ack = 0
+  let rejected = 0
+  for (let batch = 0; batch < 60; batch++) {
+    const start = batch * 100
+    for (let offset = 0; offset < 100; offset += 25) {
+      if (room.receive(connection, frame(binding, ++seq, { attackPressed: true, moveX: 0 }), start + offset)) accepted.push(seq)
+      else rejected++
+    }
+    expect(accepted.filter((sent) => sent > ack).length).toBeLessThanOrEqual(6)
+    wake(start + 100)
+    const checkpoint = room.checkpoint(connection)
+    expect(checkpoint.serverTick).toBe((batch + 1) * 3)
+    expect(checkpoint.ackInputSeq).toBeGreaterThanOrEqual(ack)
+    expect(checkpoint.controller.movement.lastProcessedInputSeq).toBeLessThanOrEqual(checkpoint.ackInputSeq)
+    ack = checkpoint.ackInputSeq
+  }
+  expect(rejected).toBeGreaterThan(0)
+  wake(6200)
+  wake(6200)
+  expect(room.checkpoint(connection)).toMatchObject({
+    ackInputSeq: seq,
+    controller: { physics: { grounded: true }, action: { kind: 'none' } },
+  })
   world.disposeRoom(room)
 })
 
@@ -238,13 +381,13 @@ test('flushes queued input when the authority enters Death and rejects late fram
   const binding = room.join(connection, 0)
   expect(room.receive(connection, frame(binding, 1), 0)).toBe(true)
   expect(room.receive(connection, frame(binding, 2, { jumpPressed: true }), 0)).toBe(true)
-  room.advance({ tick: 1, dtSeconds: fixedDeltaSeconds })
+  room.advance({ tick: 1, dtSeconds: fixedDeltaSeconds }, 1000 / 30)
   expect(room.checkpoint(connection)).toMatchObject({
     ackInputSeq: 2,
     controller: { action: { kind: 'death', diedAtTick: 1 }, movement: { lastProcessedInputSeq: 1 } },
   })
   expect(room.receive(connection, frame(binding, 3, { jumpPressed: true }), 40)).toBe(false)
-  room.advance({ tick: 2, dtSeconds: fixedDeltaSeconds })
+  room.advance({ tick: 2, dtSeconds: fixedDeltaSeconds }, 2000 / 30)
   expect(room.checkpoint(connection).ackInputSeq).toBe(2)
 })
 
@@ -303,6 +446,7 @@ test('replays the same multi-actor trace with regular and delayed clock wakes', 
       room.receive(one, frame(a, segment, { jumpPressed: segment === 1 }), start)
       const end = start + 300
       if (delayed) {
+        wake(start + 100)
         wake(end)
         wake(end)
       } else {

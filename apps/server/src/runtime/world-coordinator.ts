@@ -36,15 +36,17 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
   let instanceSequence = 0
 
   function start(): void {
+    let wakeMilliseconds = clock.nowMilliseconds()
     const driver = createFixedTickDriver(
-      clock,
+      { nowMilliseconds: () => wakeMilliseconds },
       (frame) => {
-        for (const id of [...rooms.keys()].sort()) rooms.get(id)?.advance(frame)
+        for (const id of [...rooms.keys()].sort()) rooms.get(id)?.advance(frame, wakeMilliseconds)
         tick = frame.tick
       },
       tick
     )
     stop = schedule(() => {
+      wakeMilliseconds = clock.nowMilliseconds()
       const advance = driver.advance()
       backlogTicks = advance.backlogTicks
       catchUpTicks += Math.max(0, advance.steps - 1)

@@ -15,7 +15,6 @@ import {
 } from '@viesma/protocol'
 import { createFixedTickDriver, getPlayerPresentationState, ticksPerSecond, type FixedTickDriver } from '@viesma/simulation'
 import { attachBrowserInput } from '../input/browser-input'
-import { mapNames } from '../playground/scene'
 import { createWorldRenderer } from '../rendering/world-renderer'
 import { createCorrectionPresentation } from './correction-presentation'
 import { createLocalPrediction } from './local-prediction'
@@ -34,10 +33,12 @@ export async function runMultiplayer(
   signal: AbortSignal
 ): Promise<void> {
   if (signal.aborted) return
+  const document = host.ownerDocument
+  const diagnostics = new URLSearchParams(document.location.search).get('multiplayerDiagnostics') === '1'
   const data = loadGrayboxGameData()
   const map = data.tiledMaps.find(({ id }) => id === 'm1')
   if (!map) throw new Error('Missing M1 map')
-  const mapName = mapNames.get(map.id) ?? map.id
+  const mapName = data.world.maps.find(({ id }) => id === map.id)?.name ?? map.id
   const bytes = new TextEncoder().encode(serializeMapManifest(data))
   const hash = await crypto.subtle.digest('SHA-256', bytes)
   const mapContentHash = Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join('')
@@ -45,11 +46,11 @@ export async function runMultiplayer(
   const renderer = await createWorldRenderer(
     host,
     { width: initialPhysicsBalance.bodyWidthWorldUnits, height: initialPhysicsBalance.bodyHeightWorldUnits },
-    signal
+    signal,
+    diagnostics
   )
   if (!renderer || signal.aborted) return
 
-  const document = host.ownerDocument
   const endpoint = new URL('/multiplayer', document.location.href)
   const room = await new Client(endpoint.href).joinOrCreate<MapRoomState>(
     mapRoomName,
@@ -101,9 +102,11 @@ export async function runMultiplayer(
       monsters
     )
     latest = { self, serverTick, mapInstanceId }
-    host.dataset.remoteSnapshotTick = String(serverTick)
-    host.dataset.remoteAuthorityX = String(peers[0]?.x ?? '')
-    host.dataset.sharedMonsters = JSON.stringify(monsters)
+    if (diagnostics) {
+      host.dataset.remoteSnapshotTick = String(serverTick)
+      host.dataset.remoteAuthorityX = String(peers[0]?.x ?? '')
+      host.dataset.sharedMonsters = JSON.stringify(monsters)
+    }
   }
 
   function startClock() {
@@ -119,7 +122,7 @@ export async function runMultiplayer(
           driver = undefined
           correction.reset()
           input.clear()
-          host.dataset.predictionOverflows = String(prediction.diagnostics.historyOverflows)
+          if (diagnostics) host.dataset.predictionOverflows = String(prediction.diagnostics.historyOverflows)
         }
         return undefined
       },
@@ -144,7 +147,7 @@ export async function runMultiplayer(
     const result = prediction.receive(checkpoint)
     const after = prediction.predicted?.controller.position
     if (result === 'ignored' || !after) return
-    const { ackInputSeq, lastCorrectionWorldUnits, replayedInputs } = prediction.diagnostics
+    const { lastCorrectionWorldUnits, replayedInputs } = prediction.diagnostics
     let mode = result === 'reconciled' ? 'none' : 'snap'
     if (result === 'reconciled' && before) {
       if (lastCorrectionWorldUnits > 0) mode = correction.correct(before, after, performance.now()) ? 'smooth' : 'snap'
@@ -152,12 +155,12 @@ export async function runMultiplayer(
       correction.reset()
       if (result === 'reset') input.clear()
     }
-    // 供開發房診斷延遲及校正，無須讓 HUD 每 tick 更新。
-    host.dataset.predictionAck = String(ackInputSeq ?? '')
-    host.dataset.predictionReplayed = String(replayedInputs)
-    if (mode !== 'none') {
-      host.dataset.predictionCorrection = String(lastCorrectionWorldUnits)
-      host.dataset.predictionCorrectionMode = mode
+    if (diagnostics) {
+      host.dataset.predictionReplayed = String(replayedInputs)
+      if (mode !== 'none') {
+        host.dataset.predictionCorrection = String(lastCorrectionWorldUnits)
+        host.dataset.predictionCorrectionMode = mode
+      }
     }
     startClock()
   })
@@ -196,9 +199,11 @@ export async function runMultiplayer(
     const position = correction.positionAt(controller.position, now)
     const { peers, monsters } = remote.sample(now)
     renderer.render({ position, state, facing, visualTick: tick, map, peers, monsters })
-    const peer = peers.values().next().value
-    const trace = peer ? JSON.stringify({ x: peer.position.x, tick: peer.visualTick, mode: peer.mode }) : ''
-    if (host.dataset.remoteFrame !== trace) host.dataset.remoteFrame = trace
+    if (diagnostics) {
+      const peer = peers.values().next().value
+      const trace = peer ? JSON.stringify({ x: peer.position.x, tick: peer.visualTick, mode: peer.mode }) : ''
+      if (host.dataset.remoteFrame !== trace) host.dataset.remoteFrame = trace
+    }
 
     const { hp, maxHp } = latest.self
     const players = peers.size + 1
@@ -226,15 +231,16 @@ export async function runMultiplayer(
       prediction?.dispose()
       correction.reset()
       remote.clear()
-      delete host.dataset.predictionAck
-      delete host.dataset.predictionReplayed
-      delete host.dataset.predictionCorrection
-      delete host.dataset.predictionCorrectionMode
-      delete host.dataset.predictionOverflows
-      delete host.dataset.remoteSnapshotTick
-      delete host.dataset.remoteAuthorityX
-      delete host.dataset.sharedMonsters
-      delete host.dataset.remoteFrame
+      if (diagnostics) {
+        delete host.dataset.predictionReplayed
+        delete host.dataset.predictionCorrection
+        delete host.dataset.predictionCorrectionMode
+        delete host.dataset.predictionOverflows
+        delete host.dataset.remoteSnapshotTick
+        delete host.dataset.remoteAuthorityX
+        delete host.dataset.sharedMonsters
+        delete host.dataset.remoteFrame
+      }
       void room.leave()
     },
     { once: true }

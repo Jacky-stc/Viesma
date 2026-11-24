@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter @viesma/simulation... --filter @viesma/network-colyseus... run build && vite --host 127.0.0.1",
+    "dev": "pnpm -w run build:shared && pnpm run dev:serve",
+    "dev:serve": "vite --host 127.0.0.1",
     "preview": "vite preview --host 127.0.0.1 --strictPort",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
     "build": "vite build"

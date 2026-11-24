@@ -23,10 +23,12 @@ const initialMapEpoch = 0
 const inputRate = 40
 const inputBurst = 80
 const inputQueueCapacity = 6
+const inputQueueTtlMilliseconds = 200
 type ParsedFrame = NonNullable<ReturnType<typeof parseInputFrame>>
 
 interface QueuedFrame {
   readonly frame: ParsedFrame
+  readonly receivedMilliseconds: number
   conflict: boolean
 }
 
@@ -39,6 +41,10 @@ interface CharacterActor extends MapRoomJoin {
   dead: boolean
   inputTokens: number
   lastRefillMilliseconds: number
+}
+
+function expireQueuedInputs(pending: QueuedFrame[], nowMilliseconds: number): void {
+  while (pending[0] && nowMilliseconds - pending[0].receivedMilliseconds > inputQueueTtlMilliseconds) pending.shift()
 }
 
 export function createMapRuntime(
@@ -97,6 +103,7 @@ export function createMapRuntime(
       if (!frame || frame.connectionEpoch !== actor.connectionEpoch || frame.mapEpoch !== actor.mapEpoch) return false
       const maxSeq = inputBurst + Math.floor(((nowMilliseconds - actor.joinedMilliseconds) * ticksPerSecond) / 1000)
       if (frame.seq > maxSeq) return false
+      expireQueuedInputs(actor.pending, nowMilliseconds)
       if (actor.lastReceivedInputSeq !== null && frame.seq <= actor.lastReceivedInputSeq) {
         const newest = actor.pending.at(-1)
         const last = newest?.frame
@@ -110,9 +117,12 @@ export function createMapRuntime(
         return false
       }
       actor.lastReceivedInputSeq = frame.seq
-      // 保留最新意圖並捨棄舊 edge。下一 tick 結案最新幀時一併確認此前序號。
-      if (actor.pending.length === inputQueueCapacity) actor.pending.length = 0
-      actor.pending.push({ frame, conflict: false })
+      if (actor.pending.length === inputQueueCapacity) {
+        const evicted = actor.pending.findIndex(({ conflict, frame }) => conflict || (!frame.jumpPressed && !frame.attackPressed))
+        if (evicted === -1) return false
+        actor.pending.splice(evicted, 1)
+      }
+      actor.pending.push({ frame, receivedMilliseconds: nowMilliseconds, conflict: false })
       return true
     },
     /** 測試介面僅供伺服器呼叫，於下一個 tick 套用。 */
@@ -122,7 +132,7 @@ export function createMapRuntime(
       pendingFixtureEvents.add(event)
       return true
     },
-    advance({ tick, dtSeconds }: FixedTick): void {
+    advance({ tick, dtSeconds }: FixedTick, nowMilliseconds: number): void {
       if (disposed) return
       const currentPlayers = new Map(state.map.players.map((player) => [player.characterId, player]))
       const players = []
@@ -132,10 +142,9 @@ export function createMapRuntime(
         const { characterId } = actor
         const player = currentPlayers.get(characterId) ?? createPlayer(characterId, spawn.position, true, spawn.facing)
         players.push(player)
+        expireQueuedInputs(actor.pending, nowMilliseconds)
         const pending = actor.pending.shift()
-        if (!pending) continue
-        actor.ackInputSeq = pending.frame.seq
-        if (!pending.conflict)
+        if (pending && !pending.conflict)
           commands.push({
             kind: 'input',
             characterId,
@@ -154,13 +163,17 @@ export function createMapRuntime(
       state = result.state
       if (monster) monster = stepMonsterFixture(monster, pendingFixtureEvents)
       pendingFixtureEvents.clear()
-      if (result.events.length === 0) return
-      const deaths = new Set(result.events.filter(({ kind }) => kind === 'playerDied').map(({ characterId }) => characterId))
+      const deaths = result.events.length
+        ? new Set(result.events.filter(({ kind }) => kind === 'playerDied').map(({ characterId }) => characterId))
+        : undefined
       for (const actor of actors.values()) {
-        if (!deaths.has(actor.characterId)) continue
-        actor.dead = true
-        actor.pending.length = 0
-        actor.ackInputSeq = actor.lastReceivedInputSeq
+        if (deaths?.has(actor.characterId)) {
+          actor.dead = true
+          actor.pending.length = 0
+        }
+        const firstOutstanding = actor.pending[0]?.frame.seq
+        // 佇列嚴格遞增，且本 tick 已移除首幀，所以剩餘的首序號至少為 1。
+        actor.ackInputSeq = firstOutstanding === undefined ? actor.lastReceivedInputSeq : ((firstOutstanding - 1) as ParsedFrame['seq'])
       }
     },
     snapshot(): PublicMapRoom {

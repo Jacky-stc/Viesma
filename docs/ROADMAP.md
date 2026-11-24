@@ -274,6 +274,12 @@ flowchart LR
 - **Chromium 驗收**。Chromium 159.0.8154.6（啟用 SwiftShader），預設 2567 已占用，`pnpm run test:smoke` 使用 25825。預設 6 workers 完整重跑通過 16 項。雙頁以各自收到的相同 server tick 比對怪物 ID／位置，注入 45 ms 有序下行延遲並在多個 patch 之間驗證遠端中間位置。離房移除同伴 sprite，Slime 留在房內，重入取得相同 ID。伺服器測試事件令兩頁觀察到相同的 HP 71 → 35 與後續 sprite 移除。既有桌面鍵盤與 667 × 375 橫向觸控回歸通過，兩頁各維持一個 canvas，無未捕捉的執行期例外。前兩輪修正了固定畫面取樣頻率與兩頁同步讀取的測試假設。 [多人 smoke](../tests/smoke/multiplayer.spec.mjs)
 - **限制**。公開 Schema 升到 protocol v3，client 與 server 需配對更新。遠端外推僅呈現座標，斷訊或地形邊緣可有短暫視覺偏差。多人驗證限 M1 開發房與單隻地面巡邏 fixture。平行 smoke 曾觀察到短暫 tick backlog；實機與長時間負載另由後續任務驗證。
 
+**Pre-M3.4 維護（2026-11-25）**。六幀佇列保留有效輸入邊緣，加入 200 ms 伺服器排隊期限與累積 ACK 回歸。多人地圖名稱取自已載入資料，畫面診斷改為明確啟用，根 dev 入口集中建置共享套件，CI 由 lint 執行套件邊界檢查。Node.js 24.22.3／pnpm 11.19.0 通過 356 項 Vitest，三個 dev 入口皆從乾淨輸出啟動。 [輸入與同步契約](ARCHITECTURE.md#5-input-protocol-與同步) · [開發與驗證](../README.md#開發環境)
+
+六 worker 重疊測試重現 `WORLD_TICK_BACKLOG`。拒絕前喚醒間隔達 3.36 秒，Node 主執行緒約用 16 ms CPU，入房時仍積欠 92 ticks，支持測試主機資源競爭是主因。`test:smoke` 先用單 worker 跑多人測試，完成清理後再以預設 worker 跑其餘測試。保留入房保護、30 Hz 步進、5 ticks 補跑上限、10 Hz 公開 patch、輸入佇列與 TTL、ACK 與校正契約。需要調查全套平行負載時，直接執行 `pnpm exec playwright test --workers=6`。 [Smoke 指令](../README.md#app-smoke)
+
+Windows 以 Node.js 24.22.3／pnpm 11.19.0 通過資產與地圖驗證、typecheck、lint、格式與套件邊界檢查、356 項 Vitest 及正式建置。`--list` 確認兩批完整涵蓋原有 17 項且無重複。兩輪 smoke 都通過多人 3/3 與其餘 14/14。已驗證兩批的退出碼、啟動失敗與 Windows Ctrl+C 清理。Ubuntu CI 待執行。多人 smoke 的量測範圍為單房雙瀏覽器，多房、滿房與長時間負載仍由 M8.3 驗證。
+
 ### M3.4 — Cross-room transfer 與基礎 reconnect
 
 - **Task ID**：M3.4

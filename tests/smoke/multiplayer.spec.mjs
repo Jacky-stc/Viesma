@@ -1,7 +1,16 @@
 import { expect, test } from '@playwright/test'
 import { Buffer } from 'node:buffer'
 import { clearTimeout, setTimeout } from 'node:timers'
-import { startBrowserFixtureServer } from '../../apps/server/test/browser-fixture-server.mjs'
+import { joinSmokePeer, startBrowserFixtureServer } from '../../apps/server/test/browser-fixture-server.mjs'
+
+async function routeFixtureRoom(page, fixture) {
+  let seat
+  await page.route('**/multiplayer/matchmake/joinOrCreate/map', async (route) => {
+    seat = await fixture.reserve(route.request().postDataJSON())
+    await route.fulfill({ json: seat })
+  })
+  return () => seat
+}
 
 async function gateInputFrames(page, fixtureAddress) {
   const messageName = Buffer.from('InputFrame')
@@ -13,7 +22,7 @@ async function gateInputFrames(page, fixtureAddress) {
   let incoming = 0
   let delayedBatches = 0
   await page.routeWebSocket(
-    ({ host, pathname }) => (fixtureAddress ? host === fixtureAddress : pathname.startsWith('/multiplayer/')),
+    ({ host }) => host === fixtureAddress,
     (socket) => {
       const server = socket.connectToServer()
       const pending = []
@@ -73,6 +82,67 @@ async function gateInputFrames(page, fixtureAddress) {
   }
 }
 
+test('plays multiplayer by default without diagnostic DOM writes during patches or cleanup', async ({ page, baseURL }) => {
+  const diagnosticAttributes = [
+    'data-prediction-ack',
+    'data-prediction-replayed',
+    'data-prediction-correction',
+    'data-prediction-correction-mode',
+    'data-prediction-overflows',
+    'data-remote-snapshot-tick',
+    'data-remote-authority-x',
+    'data-shared-monsters',
+    'data-remote-frame',
+    'data-monster-sprites',
+    'data-peer-sprites',
+  ]
+  let checkpoints = 0
+  const checkpointMessage = Buffer.from('MovementCheckpoint')
+  page.on('websocket', (socket) => {
+    socket.on('framereceived', ({ payload }) => {
+      if (Buffer.isBuffer(payload) && payload.includes(checkpointMessage)) checkpoints++
+    })
+  })
+  await page.addInitScript((attributes) => {
+    const { document, MutationObserver } = globalThis
+    const writes = []
+    const observer = new MutationObserver((records) => {
+      for (const { attributeName, target } of records) {
+        if (target.classList.contains('playground-canvas')) writes.push(attributeName)
+      }
+    })
+    observer.observe(document, { attributes: true, attributeFilter: attributes, subtree: true })
+    globalThis.diagnosticWrites = writes
+  }, diagnosticAttributes)
+  const scene = page.locator('.playground-canvas')
+  const readDiagnostics = () =>
+    scene.evaluate((host, names) => host.getAttributeNames().filter((name) => names.includes(name)), diagnosticAttributes)
+  await page.goto('/')
+  await page.getByLabel('場景模式').selectOption('multiplayer')
+  await expect(page.getByLabel('目前地圖')).toHaveText('Forest Entrance')
+  const peer = await joinSmokePeer(baseURL)
+  try {
+    await expect(page.getByLabel('同房角色數')).toHaveText('同房 2 人')
+    await page.bringToFront()
+    await page.getByRole('region', { name: '平台測試場' }).focus()
+    const before = checkpoints
+    await page.keyboard.down('ArrowRight')
+    await expect(page.getByLabel('Beginner 狀態')).toContainText('跑步 · 朝右')
+    await expect.poll(() => checkpoints).toBeGreaterThanOrEqual(before + 3)
+    await page.keyboard.up('ArrowRight')
+    await expect(page.getByLabel('Beginner 狀態')).toContainText('待機')
+    expect(await readDiagnostics()).toEqual([])
+
+    await page.getByRole('button', { name: '卸載場景' }).click()
+    await expect(page.getByRole('img', { name: 'Beginner 平台場景' })).toHaveCount(0)
+    await expect.poll(() => peer.state.players.size).toBe(1)
+    expect(await readDiagnostics()).toEqual([])
+    expect(await page.evaluate(() => globalThis.diagnosticWrites)).toEqual([])
+  } finally {
+    await peer.leave()
+  }
+})
+
 test('two M1 browsers predict keyboard and touch before delivery and reconcile a large server correction', async ({
   page,
   browser,
@@ -80,19 +150,25 @@ test('two M1 browsers predict keyboard and touch before delivery and reconcile a
 }) => {
   test.slow()
   const other = await browser.newPage({ baseURL, viewport: { width: 667, height: 375 }, hasTouch: true, isMobile: true })
+  const fixture = await startBrowserFixtureServer()
   try {
     const errors = []
-    const keyboard = await gateInputFrames(page)
-    const touchInput = await gateInputFrames(other)
+    const keyboardSeat = await routeFixtureRoom(page, fixture)
+    const touchSeat = await routeFixtureRoom(other, fixture)
+    const keyboard = await gateInputFrames(page, fixture.address)
+    const touchInput = await gateInputFrames(other, fixture.address)
     const canvas = page.getByRole('img', { name: 'Beginner 平台場景' })
     const scene = (client) => client.locator('.playground-canvas')
-    const ack = async (client) => Number(await scene(client).getAttribute('data-prediction-ack'))
+    const ack = (seat) => fixture.ownerAck(seat()) ?? 0
     for (const client of [page, other]) {
       client.on('pageerror', (error) => errors.push(error.message))
-      await client.goto('/')
+      await client.goto('/?multiplayerDiagnostics=1')
+    }
+    for (const client of [page, other]) {
       await client.getByLabel('場景模式').selectOption('multiplayer')
       await expect(client.getByLabel('目前地圖')).toHaveText('Forest Entrance', { timeout: 15000 })
       await expect(client.getByRole('img', { name: 'Beginner 平台場景' })).toHaveCount(1)
+      await expect(scene(client)).not.toHaveAttribute('data-prediction-ack')
     }
     await expect(page.getByLabel('同房角色數')).toHaveText('同房 2 人')
     await expect(other.getByLabel('同房角色數')).toHaveText('同房 2 人')
@@ -103,14 +179,14 @@ test('two M1 browsers predict keyboard and touch before delivery and reconcile a
     await page.keyboard.down('ArrowRight')
     await expect(page.getByLabel('Beginner 狀態')).toContainText('跑步 · 朝右')
     await expect.poll(keyboard.dropped).toBeGreaterThanOrEqual(16)
-    expect(await ack(page)).toBeLessThanOrEqual(keyboardBoundary)
+    expect(ack(keyboardSeat)).toBeLessThanOrEqual(keyboardBoundary)
     await expect(other.getByLabel('Beginner 狀態')).toContainText('待機')
     await page.keyboard.up('ArrowRight')
     await expect(page.getByLabel('Beginner 狀態')).toContainText('待機')
     keyboard.unblock()
     await expect.poll(async () => Number(await scene(page).getAttribute('data-prediction-correction'))).toBeGreaterThan(64)
     await expect(scene(page)).toHaveAttribute('data-prediction-correction-mode', 'snap')
-    await expect.poll(() => ack(page)).toBeGreaterThan(keyboardBoundary)
+    await expect.poll(() => ack(keyboardSeat)).toBeGreaterThan(keyboardBoundary)
 
     await other.bringToFront()
     const touch = await other.context().newCDPSession(other)
@@ -121,9 +197,9 @@ test('two M1 browsers predict keyboard and touch before delivery and reconcile a
     await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: x + width / 2, y: y + height / 2 }] })
     await expect(other.getByLabel('Beginner 狀態')).toContainText('跑步 · 朝左')
     await expect.poll(touchInput.dropped).toBeGreaterThan(0)
-    expect(await ack(other)).toBeLessThanOrEqual(touchBoundary)
+    expect(ack(touchSeat)).toBeLessThanOrEqual(touchBoundary)
     touchInput.unblock()
-    await expect.poll(() => ack(other)).toBeGreaterThan(touchBoundary)
+    await expect.poll(() => ack(touchSeat)).toBeGreaterThan(touchBoundary)
     await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     await expect(other.getByLabel('Beginner 狀態')).toContainText('待機')
 
@@ -141,6 +217,7 @@ test('two M1 browsers predict keyboard and touch before delivery and reconcile a
     expect(errors).toEqual([])
   } finally {
     await other.close()
+    await fixture.close()
   }
 })
 
@@ -160,12 +237,11 @@ test('interpolates under patch jitter and synchronizes the shared monster throug
   try {
     const network = await gateInputFrames(page, fixture.address)
     for (const client of [page, mover]) {
-      await client.route('**/multiplayer/matchmake/joinOrCreate/map', async (route) => {
-        const response = await route.fetch({ url: `http://${fixture.address}/matchmake/joinOrCreate/map` })
-        await route.fulfill({ response, json: { ...(await response.json()), publicAddress: fixture.address } })
-      })
+      await routeFixtureRoom(client, fixture)
       client.on('pageerror', (error) => errors.push(error.message))
-      await client.goto('/')
+      await client.goto('/?multiplayerDiagnostics=1')
+    }
+    for (const client of [page, mover]) {
       await client.getByLabel('場景模式').selectOption('multiplayer')
       await expect(client.getByLabel('目前地圖')).toHaveText('Forest Entrance', { timeout: 15000 })
       await expect(canvas(client)).toHaveCount(1)

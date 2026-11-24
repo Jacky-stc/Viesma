@@ -213,6 +213,99 @@ test('wall correction snaps across a solid, while a small clear correction decay
   expect(shown.correct(right, { x: 440, y: 252 }, 210)).toBe(false)
 })
 
+test('replays an outstanding jump from a runtime checkpoint, then converges after the burst is settled', () => {
+  let nextId = 0
+  const room = createMapRuntime(roomId, map, { position: start, facing: 'right' }, 'hash', 0, () => `id-${++nextId}`)
+  const connection = {}
+  const joined = room.join(connection, 0)
+  const prediction = createLocalPrediction(map, roomId, joined)
+  room.advance({ tick: 1, dtSeconds: fixedDeltaSeconds }, 34)
+  expect(prediction.receive(parseMovementCheckpoint(room.checkpoint(connection)))).toBe('reset')
+  const frames = [prediction.step({ ...neutral, jumpPressed: true }, 1)]
+  for (let seq = 2; seq <= 7; seq++) frames.push(prediction.step(neutral, seq))
+
+  room.advance({ tick: 2, dtSeconds: fixedDeltaSeconds }, 67)
+  const pending = parseMovementCheckpoint(room.checkpoint(connection))
+  expect(pending).toMatchObject({ ackInputSeq: null, controller: { physics: { grounded: true } } })
+  expect(prediction.receive(pending)).toBe('reconciled')
+  expect(prediction.diagnostics.replayedInputs).toBe(7)
+  expect(prediction.predicted.controller.locomotion).toBe('jump')
+
+  for (const frame of frames) expect(room.receive(connection, frame, 70)).toBe(true)
+  room.advance({ tick: 3, dtSeconds: fixedDeltaSeconds }, 100)
+  const applied = parseMovementCheckpoint(room.checkpoint(connection))
+  expect(applied).toMatchObject({ ackInputSeq: 2, controller: { locomotion: 'jump', movement: { lastProcessedInputSeq: 1 } } })
+  expect(prediction.receive(applied)).toBe('reconciled')
+  expect(prediction.diagnostics).toMatchObject({ pendingInputs: 5, replayedInputs: 5 })
+
+  for (let tick = 4; tick <= 8; tick++) room.advance({ tick, dtSeconds: fixedDeltaSeconds }, (1000 * tick) / 30)
+  const final = parseMovementCheckpoint(room.checkpoint(connection))
+  expect(prediction.receive(final)).toBe('reconciled')
+  expect(prediction.diagnostics).toMatchObject({ ackInputSeq: 7, pendingInputs: 0, replayedInputs: 0 })
+  expect(prediction.predicted).toEqual({ tick: final.serverTick, controller: final.controller })
+})
+
+test('prunes an expired predicted jump without replaying it after the runtime resolves its sequence', () => {
+  let nextId = 0
+  const room = createMapRuntime(roomId, map, { position: start, facing: 'right' }, 'hash', 0, () => `id-${++nextId}`)
+  const connection = {}
+  const joined = room.join(connection, 0)
+  const prediction = createLocalPrediction(map, roomId, joined)
+  room.advance({ tick: 1, dtSeconds: fixedDeltaSeconds }, 34)
+  expect(prediction.receive(parseMovementCheckpoint(room.checkpoint(connection)))).toBe('reset')
+  const jump = prediction.step({ ...neutral, jumpPressed: true }, 1)
+  expect(prediction.predicted.controller.locomotion).toBe('jump')
+  expect(room.receive(connection, jump, 40)).toBe(true)
+  room.advance({ tick: 2, dtSeconds: fixedDeltaSeconds }, 241)
+  const expired = parseMovementCheckpoint(room.checkpoint(connection))
+  expect(expired).toMatchObject({
+    ackInputSeq: 1,
+    controller: { physics: { grounded: true }, movement: { lastProcessedInputSeq: null, jumpBufferTicksRemaining: 0 } },
+  })
+  expect(prediction.receive(expired)).toBe('reconciled')
+  expect(prediction.diagnostics).toMatchObject({ pendingInputs: 0, replayedInputs: 0 })
+  expect(prediction.predicted).toEqual({ tick: expired.serverTick, controller: expired.controller })
+})
+
+test('restores an accepted runtime jump buffer after pruning its edge and keeps it across a delayed wake', () => {
+  let nextId = 0
+  const room = createMapRuntime(roomId, map, { position: start, facing: 'right' }, 'hash', 0, () => `id-${++nextId}`)
+  const connection = {}
+  const joined = room.join(connection, 0)
+  const prediction = createLocalPrediction(map, roomId, joined)
+  room.advance({ tick: 1, dtSeconds: fixedDeltaSeconds }, 34)
+  expect(prediction.receive(parseMovementCheckpoint(room.checkpoint(connection)))).toBe('reset')
+  expect(room.receive(connection, prediction.step({ ...neutral, jumpPressed: true }, 1), 40)).toBe(true)
+  for (let tick = 2; tick < 20; tick++) room.advance({ tick, dtSeconds: fixedDeltaSeconds }, (1000 * tick) / 30)
+  const falling = parseMovementCheckpoint(room.checkpoint(connection))
+  expect(falling).toMatchObject({ ackInputSeq: 1, controller: { locomotion: 'fall' } })
+  expect(prediction.receive(falling)).toBe('reconciled')
+
+  expect(room.receive(connection, prediction.step({ ...neutral, jumpPressed: true }, 2), 650)).toBe(true)
+  expect(room.receive(connection, prediction.step(neutral, 3), 660)).toBe(true)
+  const locallyPredicted = prediction.predicted
+  room.advance({ tick: 20, dtSeconds: fixedDeltaSeconds }, 667)
+  const landed = parseMovementCheckpoint(room.checkpoint(connection))
+  expect(landed).toMatchObject({
+    ackInputSeq: 2,
+    controller: { physics: { grounded: true }, movement: { lastProcessedInputSeq: 2, jumpBufferTicksRemaining: 3 } },
+  })
+  expect(prediction.receive(landed)).toBe('reconciled')
+  expect(prediction.diagnostics).toMatchObject({ pendingInputs: 1, replayedInputs: 1 })
+  expect(prediction.predicted).toEqual(locallyPredicted)
+  expect(prediction.predicted.controller.locomotion).toBe('jump')
+
+  room.advance({ tick: 21, dtSeconds: fixedDeltaSeconds }, 900)
+  const jumped = parseMovementCheckpoint(room.checkpoint(connection))
+  expect(jumped).toMatchObject({
+    ackInputSeq: 3,
+    controller: { locomotion: 'jump', movement: { lastProcessedInputSeq: 2, jumpBufferTicksRemaining: 0 } },
+  })
+  expect(prediction.receive(jumped)).toBe('reconciled')
+  expect(prediction.diagnostics).toMatchObject({ pendingInputs: 0, replayedInputs: 0 })
+  expect(prediction.predicted).toEqual({ tick: jumped.serverTick, controller: jumped.controller })
+})
+
 test.each([false, true])('converges with 150 ms RTT (jitter %s) at different render rates', (jitter) => {
   function trace(renderInterval) {
     let nextId = 0
@@ -232,8 +325,8 @@ test.each([false, true])('converges with 150 ms RTT (jitter %s) at different ren
       queue.push({ due, payload })
     }
     const server = createFixedTickDriver({ nowMilliseconds: () => now }, ({ tick }) => {
-      room.advance({ tick, dtSeconds: fixedDeltaSeconds })
-      if (tick % 3 === 0) delay(downstream, tick, room.checkpoint(connection))
+      room.advance({ tick, dtSeconds: fixedDeltaSeconds }, now)
+      if (tick % 3 === 0) delay(downstream, tick, parseMovementCheckpoint(room.checkpoint(connection)))
     })
     const client = createFixedTickDriver({ nowMilliseconds: () => now }, ({ tick }) => {
       const intent = { ...neutral, moveX: tick < 20 ? 1 : tick < 34 ? -1 : 0, jumpPressed: tick === 11, attackPressed: tick === 11 }

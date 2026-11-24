@@ -26,8 +26,6 @@ jobs:
         run: pnpm run lint
       - name: Check formatting
         run: pnpm run format:check
-      - name: Check dependency boundaries
-        run: pnpm run check:boundaries
       - name: Unit tests
         run: pnpm run test
       - name: Build

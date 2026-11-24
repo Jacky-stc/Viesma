@@ -7,14 +7,15 @@
     "node": ">=24.22.3 <25"
   },
   "scripts": {
-    "dev": "pnpm -r --parallel run dev",
+    "dev": "pnpm run build:shared && pnpm -r --parallel --filter \"./apps/*\" run dev:serve",
+    "build:shared": "pnpm --filter @viesma/simulation... --filter @viesma/network-colyseus... run build",
     "typecheck": "pnpm -r run typecheck",
     "lint": "eslint . && pnpm run check:boundaries",
     "check:boundaries": "node tools/check-workspace-dependencies.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "test:smoke": "playwright test",
+    "test:smoke": "node tools/run-smoke.mjs",
     "validate:maps": "pnpm --filter @viesma/game-data... run build && node apps/server/tools/validate-maps.mjs",
     "validate:assets": "node apps/client/tools/validate-assets.ts",
     "build": "pnpm -r run build"

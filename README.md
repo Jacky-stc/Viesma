@@ -13,9 +13,9 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-開啟 Vite 在終端機顯示的本機網址，確認 React 入口顯示 Viesma。Vite 預設使用 `http://127.0.0.1:5173`，若連接埠已被占用，會使用下一個可用的連接埠。Colyseus server 監聽 `127.0.0.1:2567`，啟動後會在終端機顯示網址。開發 shell 只需要 Node.js 和 pnpm。
+`pnpm dev` 先建置一次共用套件，再平行啟動兩個服務。開啟 Vite 在終端機顯示的本機網址，確認 React 入口顯示 Viesma。Vite 預設使用 `http://127.0.0.1:5173`，若連接埠已被占用，會使用下一個可用的連接埠。Colyseus server 監聽 `127.0.0.1:2567`，啟動後會在終端機顯示網址。開發 shell 只需要 Node.js 和 pnpm。
 
-Beginner 平台測試場需要支援 WebGL 的瀏覽器。角色自動循環示範移動、跳躍和動作，場景下方顯示碰撞圖例與目前狀態。使用「卸載場景」釋放畫面資源，再按「載入場景」從腳本起點播放。單獨開發 client 可執行 `pnpm --filter @viesma/client run dev`。渲染契約見 [ARCHITECTURE §10.1](docs/ARCHITECTURE.md#101-m13-平台測試場)。
+Beginner 平台測試場需要支援 WebGL 的瀏覽器。角色自動循環示範移動、跳躍和動作，場景下方顯示碰撞圖例與目前狀態。使用「卸載場景」釋放畫面資源，再按「載入場景」從腳本起點播放。可用 `pnpm --filter @viesma/client run dev` 或 `pnpm --filter @viesma/server run dev` 單獨啟動一個服務，兩個入口都會先建置共用套件。渲染契約見 [ARCHITECTURE §10.1](docs/ARCHITECTURE.md#101-m13-平台測試場)。
 
 ### PostgreSQL 開發與測試服務
 
@@ -62,7 +62,6 @@ pnpm install --frozen-lockfile
 pnpm run typecheck
 pnpm run lint
 pnpm run format:check
-pnpm run check:boundaries
 pnpm run test
 pnpm run build
 ```
@@ -77,7 +76,7 @@ M0.2 的五個共用套件透過 `@viesma/*` 公開入口匯入。TypeScript 解
 pnpm --filter @viesma/simulation run test
 ```
 
-`lint` 檢查 source import 邊界，並在最後執行 workspace dependency graph 檢查。純單元測試置於 `apps/*/test/` 或 `packages/*/test/`，檔名以 `.test.ts` 或 `.test.mjs` 結尾。Simulation 的 headless harness 注入 clock、seed 與 ID，覆蓋 30 Hz 時序、固定 delta、catch-up 與重播。
+`lint` 檢查 source import 邊界，並在最後執行 workspace dependency graph 檢查。也可單獨執行 `pnpm run check:boundaries`。純單元測試置於 `apps/*/test/` 或 `packages/*/test/`，檔名以 `.test.ts` 或 `.test.mjs` 結尾。Simulation 的 headless harness 注入 clock、seed 與 ID，覆蓋 30 Hz 時序、固定 delta、catch-up 與重播。
 
 ### Game data
 
@@ -96,13 +95,19 @@ pnpm exec playwright install chromium
 pnpm run test:smoke
 ```
 
-Playwright 會啟停 production preview 與 Colyseus server，驗證 Chromium 的 WebGL 場景、鍵盤走訪七圖與抵達鏡頭、橫向觸控往返 Village 和兩張戰鬥圖、兩個獨立瀏覽器工作階段在 M1 同房移動，以及 `/__healthcheck` 回傳 HTTP 200。測試環境可使用 SwiftShader 繪圖。預設使用 4173 和 2567。若 2567 已有開發伺服器，PowerShell 可在同一個終端執行 `$env:VIESMA_SERVER_PORT = '25822'`，再執行 `pnpm run test:smoke --workers=1`。CI 或缺瀏覽器系統套件的 Linux 可執行 `pnpm exec playwright install --with-deps chromium` 安裝 Chromium 和系統套件。
+`test:smoke` 先用一個 worker 執行 `multiplayer.spec.mjs`，待 Playwright 清理該批的瀏覽器與伺服器後，再用預設 worker 配置執行其餘測試。第一批失敗時仍會執行第二批，任一批失敗都會使整體失敗。可用 `pnpm run test:smoke --list` 檢查分批範圍。測試涵蓋 WebGL、鍵盤七圖走訪、橫向觸控、M1 同房與 `/__healthcheck`。
+
+六 worker 重疊時，測試主機資源競爭延遲 Node.js 喚醒，導致多人入房觸發 `WORLD_TICK_BACKLOG`。分批保留入房保護、固定 30 Hz 步進與每次喚醒最多 5 ticks、10 Hz 公開 patch、輸入佇列與 200 ms TTL，以及 ACK 與校正契約。需要重現整套平行負載時，可直接執行 `pnpm exec playwright test --workers=6`。
+
+Chromium 測試可使用 SwiftShader，預設連接埠為 4173 和 2567。若 2567 已有開發伺服器，PowerShell 可在同一個終端設定 `$env:VIESMA_SERVER_PORT = '25822'` 再執行 smoke。CI 或缺瀏覽器系統套件的 Linux 可用 `pnpm exec playwright install --with-deps chromium` 安裝 Chromium 和系統套件。Windows 驗證結果與負載限制見 [Pre-M3.4 維護紀錄](docs/ROADMAP.md#m33--remote-interpolation-與共享怪物-fixture)。
 
 ### M1 多人測試
 
 使用 `pnpm dev` 啟動 client 與本機 server。以兩個分頁開啟 Vite 網址，將場景模式切到「多人測試」。點選場景取得焦點後，以 ←／→ 或 A／D 移動、Space 跳躍。兩端的「同房角色數」會更新。切換模式或卸載場景就會離開房間。
 
 Vite dev 與 preview 以 `/multiplayer` 代理本機的 matchmaking 與 WebSocket。自訂連接埠時，讓兩個程序使用相同的 `VIESMA_SERVER_PORT`。角色為單次連線的匿名開發角色，入房會比對 protocol／balance／地圖內容版本。本人的移動由瀏覽器以 30 Hz 即時預測，再依伺服器確認重播。瀏覽器以 10 Hz 公開 patch 和 100 ms 的緩衝畫出同伴的移動與房內共用的巡邏 Slime。 [房間與同步契約](docs/ARCHITECTURE.md#5-input-protocol-與同步)
+
+多人畫面診斷預設關閉。需要檢查瀏覽器取樣或 sprite 清理時，可用 `/?multiplayerDiagnostics=1` 開啟頁面，再切到「多人測試」。
 
 CI 接著以一次性密碼執行上述 PostgreSQL health smoke，並清理由該 job 建立的容器與 volume。
 

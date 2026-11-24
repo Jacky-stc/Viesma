@@ -199,14 +199,16 @@ Client 以同樣30Hz跑 local physics，render 以 `requestAnimationFrame` 自�
 
 Connection 在入房時綁定 account／character，不允許 payload 冒用其他 owner。非 input messages 亦帶 protocolVersion，mutation envelope 帶目前 connectionEpoch；所有欄位做 schema、大小、數值有限性與 rate validation。
 
-Input seq 在 connection epoch 內單調遞增。Server 拒絕舊 epoch、已見的序號及超出「連線經過時間換算的 30 Hz ticks 加 80」的過遠序號。每個角色每 tick 依序最多取出一幀，佇列最多 6 幀。第 7 幀到達時捨棄積欠的 6 幀，只保留新幀。重複的最新待處理幀若有不同內容，該位置結案但不套用。取出有效幀或衝突幀時，`ackInputSeq` 同時確認所有更早已略過的序號，已捨棄的 jump／attack edge 不補放。連續 6 ticks 未套用新幀時，既有控制器將水平意圖轉為中立。Death 結案並清除剩餘輸入，停止接受該生命的新幀。離房撤銷連線資格，SDK reconnect buffer 不參與輸入發送。
+Input seq 在 connection epoch 內單調遞增。Server 拒絕舊 epoch、已見的序號及超出「連線經過時間換算的 30 Hz ticks 加 80」的過遠序號。每角色使用同一個六幀 FIFO，每 tick 最多套用一幀。滿隊時淘汰最舊的純移動幀或衝突幀，保留有效 jump／attack 邊緣的原始序號、方向及順序。若六幀都是有效邊緣，新幀拒收並結案。最新待處理幀收到異內容的同序號重送時標為衝突，後續不套用。已淘汰或拒收的序號不能靠重送復活。
+
+佇列以伺服器 monotonic clock 記錄首次收件時間，重送不刷新時間。接收與步進前，排隊超過 200 ms 的整幀會結案，正好 200 ms 仍可用。同次 scheduler 補跑使用同一份喚醒時間。TTL 只量測伺服器端排隊時間，網路傳輸時間未計入。已由控制器接受的 jump buffer 仍按 simulation tick 推進。連續 6 ticks 未套用新幀時，控制器將水平意圖轉為中立。Death 結案並清除剩餘輸入，停止接受該生命的新幀。離房撤銷連線資格，SDK reconnect buffer 不參與輸入發送。
 
 初始限流：input 40 messages/s、burst80；gameplay mutations 每角色10/s、burst20；party invite cooldown 見 GAME_DESIGN；單 payload 最大4 KiB。另設 account／IP 的 login／register limits，具體由 M7.2 設定。Rate reject 不執行 mutation；惡意重複或無效 payload 可斷線並記錄。
 
 ### 5.2 Server → client
 
 - **Public Schema，10 Hz**。房間包含 `serverTick`、`mapId`、`mapInstanceId` 與 `mapContentHash`。角色投影含位置、朝向、狀態、HP／MaxHP、`mapEpoch` 和 `lifeStartedTick`。`mapEpoch` 屬於個別角色。測試怪物投影含 `monsterId`、archetype、腳底中心位置、朝向、巡邏狀態與 HP／MaxHP。以房間 tick 為共用時間軸。Server 建立獨立的 plain DTO，Colyseus 以 ID 更新或移除 Schema 項目。連線 epoch 與本人 checkpoint 仍走 owner channel。
-- **Self movement checkpoint，10 Hz owner-only**。`MovementCheckpoint` 在同 tick 的 public patch 之後由 server 專門發給本人，帶版本、角色、map instance、connection／map epoch、生命開始 tick 及 server tick。`ackInputSeq` 是累積結案邊界，初值為 `null`。控制器自己的 `lastProcessedInputSeq` 和 `lastInputTick` 則記錄實際套用的輸入。完整狀態包含 position、velocity、grounded／void、水平意圖、jump buffer／coyote、facing、locomotion、action 及最近受擊 tick。HP／MaxHP 沿用公開投影。
+- **Self movement checkpoint，10 Hz owner-only**。`MovementCheckpoint` 在同 tick 的 public patch 之後由 server 專門發給本人，帶版本、角色、map instance、connection／map epoch、生命開始 tick 及 server tick。`ackInputSeq` 是累積結案邊界，初值為 `null`，在權威步進完成後才更新。它涵蓋已套用、衝突、過期、淘汰或滿隊拒收的幀，以及較新序號關閉的缺口。ACK 不跨過最早未決幀，佇列清空後涵蓋已結案的尾端。控制器自己的 `lastProcessedInputSeq` 和 `lastInputTick` 則記錄實際套用的輸入。完整狀態包含 position、velocity、grounded／void、水平意圖、jump buffer／coyote、facing、locomotion、action 及最近受擊 tick。HP／MaxHP 沿用公開投影。Wire protocol 維持 v3。
 - **Reliable visual messages**：attack／damage／death／respawn event，含 eventId 與 tick；純顯示事件可在 reconnect 丟棄，不重播舊 damage numbers。EventId 做短期去重。
 - **Owner-only messages**：character／bag／equipment snapshot、loot snapshot／delta、request result、reward receipt。`privateRevision` 不連續時重新要求完整 snapshot；重新入房／重連一定重建完整 owner view。
 - **Party-only messages**：PartyService 對所有 connected members 發送 revisioned full snapshot，包含同／跨 map 的 member 摘要。不同 party 收不到 invite／roster 私有資料。
@@ -217,14 +219,14 @@ Personal loot／inventory **不放 public room Schema**；預設用 server 指�
 
 - **預測**。本人輸入由既有鍵盤／觸控 adapter 取樣，以獨立於 rAF 的固定 30 Hz driver 推進。Client 使用和 server 相同的 `createPlayerController`、Tiled 碰撞幾何及平衡資料。預測只保有移動控制器狀態，送往 server 的只有方向、按下邊緣和序號／epoch。瀏覽器的 HUD 從 server 投影取得 HP，從本地預測取得本人的動作和朝向。
 - **歷史與重播**。本地歷史最多 120 幀，保留 `InputFrame` 完整意圖、序號、地圖／連線 epoch 與本地 tick。Checkpoint 必須屬於本人的 room、角色及連線，server tick 須較新，epoch、生命及 ack 邊界須單調。相同 ack 可出現在更新的 tick，代表 authority 已步進而未結案更多輸入。缺少 ack 欄位的 payload 會被拒絕，`null` 則表示尚未結案。接收時剪除已結案的前綴，從完整 authoritative controller 恢復，在後續固定 ticks 按序重播未確認幀。重播沿用原本的 jump edge，保留 Attack 欄位但沒有戰鬥效果。已送出的輸入不因重播而再次發送。
-- **畫面校正**。重播結果立即成為新的預測碰撞狀態。小於或等於 64 world units 且整段 AABB 路徑無 solid 的誤差，可在 100 ms 內衰減畫面 offset。大誤差、受阻的路徑，或衰減期間失去淨空時，畫面立即使用校正後的位置。Camera 跟隨本人最終的畫面位置。開發房 canvas 容器公布最近 ack、重播筆數、最近一次畫面校正或重設的距離／模式和歷史溢出次數。
+- **畫面校正**。重播結果立即成為新的預測碰撞狀態。小於或等於 64 world units 且整段 AABB 路徑無 solid 的誤差，可在 100 ms 內衰減畫面 offset。大誤差、受阻的路徑，或衰減期間失去淨空時，畫面立即使用校正後的位置。Camera 跟隨本人最終的畫面位置。
 - **重設**。新連線、Death、生命或地圖 epoch 變更清除歷史與畫面 offset。傳送或同圖瞬移可用新地圖 epoch 讓畫面立即定位。切到背景／回前景會暫停預測並從較新的 checkpoint 恢復。歷史達上限後再次取樣會清空並回到最後的權威位置，等較新的 checkpoint 才繼續。斷線或卸載會銷毀該連線的時鐘、歷史與畫面狀態，重新入房使用新的連線 epoch 及序號。
 
 M3.3 使用公開 `serverTick` 建立遠端角色／怪物的 client presentation buffer。10 Hz 每 100 ms 一個 patch，畫面延遲 100 ms（3 ticks），讓一般短暫的到達抖動有一個 patch 的緩衝。用最近最多 8 筆到達樣本中最小的到達時鐘偏移估計 server tick，畫面時鐘只往前。每個 entity 最多保留 8 筆座標。權威 HP 和成員清單隨最新 patch 更新，座標的視覺插值不回寫權威資料。
 
 - 重複或逆序 tick 丟棄。有一筆快照時停在該位置。兩筆快照間距最多 6 ticks 可插值（涵蓋漏一個一般 patch）。間距更大、身分／房間／地圖／生命世代變更，或位移超過角色移動上限時，從最新位置開始。離房及怪物移除依最新清單立即釋放各自的 buffer 與 sprite。
 - 缺少後續快照時，遠端活角色可依最後兩筆有效快照的速度，最多外推 100 ms，再停在外推終點直到更新。死亡角色與怪物停在最後權威位置。外推只用於畫面，沒有碰撞或輸入重播。Server 不回溯舊 client attack time，高 latency 的近戰命中體驗留待後續實測。
-- 開發房 canvas 容器記錄最新 snapshot tick、遠端角色的權威與畫面座標及取樣模式、權威怪物投影、可見怪物 sprite ID 及遠端角色 sprite 數量。Chromium smoke 使用這些欄位核對瀏覽器實際取樣與清理。
+- **瀏覽器診斷**。`?multiplayerDiagnostics=1` 啟用 canvas 診斷屬性，包含重播筆數、校正模式與距離、歷史溢出、snapshot tick、遠端取樣、公開怪物投影及 sprite 清理。預設關閉，跳過診斷序列化與 DOM 讀寫。本人 ACK 留在 owner checkpoint，Chromium 測試由隔離的伺服器 fixture 驗證實際送出的 ACK。
 
 Server 公告 `protocolVersion`、`balanceVersion` 與 `mapContentHash`。入房須與 server 的三個值一致，差異要求 reload。`schemaVersion` 由各端載入資料時檢查。M0.4 提供版本比對契約，M3.1 將它接入房間驗證。M3.2 的 owner checkpoint 使用 v2，M3.3 更新兩端固定使用的 Schema 並提升到 v3。遊戲只以共用 TypeScript 控制器進行本人預測及權威步進。
 
@@ -233,6 +235,8 @@ Server 公告 `protocolVersion`、`balanceVersion` 與 `mapContentHash`。入房
 七圖 graybox 的 Tiled JSON 同時作為編輯來源與發行匯出。呼叫端提供已解碼的 JSON 與外部 tileset，game-data 載入時驗證每張供應的地圖、manifest 引用和出生幾何，回傳不可變的 tile layers 及 M1.1 相容碰撞資料。完整 graybox 載入另外要求七圖都存在，使 12 個方向的傳送門都有實際目的地。Simulation 使用已驗證的資料，renderer 可使用獨立的 tile layers。Canonical manifest 納入正規化的地圖內容，asset license reference 由 M2.4 驗證。 [Tiled 地圖製作指南](TILED_MAPS.md) · [GAME_DATA](GAME_DATA.md)
 
 MapRoom 持有一份 shared monster simulation，`maxClients=20` 加上 application seat registry 的 reservation 檢查。Connection seat 與 character seat 分開計數，短暫 socket handover 不能多出第21個 character。Room key 為 `(nodeBootId, mapId, instanceSequence)`；map instance 不持久化，personal loot 另有可 rebind durable records。
+
+M3.4 以穩定的 `characterId` 跨房及重連。同一角色至多有一個有效連線綁定、一份權威 body，且每個 world tick 至多步進一次。先保留目的席位，在 world tick 邊界原子交接，再由新綁定接收輸入及 owner-only checkpoint。舊連線的輸入、離房與逾時回呼均需核對當前綁定。提交前失敗回來源，提交後從目的地恢復。
 
 Transfer state machine：
 
@@ -247,6 +251,8 @@ PartyService 不隨 map connection dispose；server 以 characterId 找現在的
 ## 7. Shared monster 與 reward pipeline
 
 M3.3 的 M1 房間各自從已驗證的 `spawn_slime_1` 建立一隻 Slime。使用該點的 Tiled 地板和巡邏區間、archetype 巡邏速度及依等級計算的 MaxHP。純 TypeScript 以 30 Hz tick 推進地面往返，runtime 持有獨立的狀態與穩定 ID。房間內的伺服器測試介面可在 tick 邊界覆寫成測試 HP（MaxHP 的一半，向下取整且最低為 1）並移除 fixture。每種事件每房僅套用一次，且沒有 client message handler。角色離開不移除怪物。房間 dispose 清除怪物與待處理事件，重新建房取得新 ID；加入存活房間則讀取當前的 fixture 狀態。
+
+M4.1 擴充 AI 前，先將 `MonsterFixture` 狀態移入 `SimulationState.map.monsters`。純 `step` 在有無玩家時均每 tick 更新一次。房間提供已驗證的定義及測試事件，對外從該集合投影。
 
 完整戰鬥與獎勵階段依下列契約交付。
 
