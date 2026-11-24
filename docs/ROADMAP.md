@@ -289,7 +289,9 @@ Windows 以 Node.js 24.22.3／pnpm 11.19.0 通過資產與地圖驗證、typeche
 - **Deliverables**：transfer state machine、destination reservation／rollback、private-message routing contract。
 - **Acceptance criteria**：Village↔M1 transfer 無雙 body；滿房／ticket timeout 回來源；commit 後掉線從 destination 恢復。
 - **Required tests**：transfer ticket replay／wrong owner／timeout、source disconnect／destination failure、20-seat races、input stale mapEpoch、兩端 handoff fault injection。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **驗證紀錄（2026-11-25）**。Windows 使用 Node.js 24.22.3／pnpm 11.19.0。資產、七圖與 12 個 directed portals、typecheck、lint、格式、套件邊界、365 項 Vitest 及正式建置全部通過。決定性測試驗證雙向交接在兩房步進前完成、單一 body 與本人 checkpoint、20 席競爭、錯誤 owner／舊 ticket、逾時、建房與接線失敗、提交前後掉線、30 秒保留期與舊 epoch fencing。
+- **瀏覽器驗收**。Chromium 159.0.8154.6／SwiftShader，以兩個工作階段驗證同房、鍵盤與 667 × 375 橫向觸控往返 Village／M1、保持同一角色及 canvas、提交後掉線從 Village 恢復、prediction 與 interpolation 重設、M1 共享 Slime，以及沒有 uncaught runtime errors。Smoke runner 多人階段 4／4、其餘 14／14。清單與直接 discovery 比對確認 18 項各執行一次。Vite 仍提示主 bundle 超過 500 kB。 [架構契約](ARCHITECTURE.md#6-map-authoringroom-與-transfer) · [決定性測試](../apps/server/test/world-travel.test.mjs) · [瀏覽器測試](../tests/smoke/multiplayer.spec.mjs)
 
 ### M3.5 — Early multiplayer slice gate
 
@@ -300,7 +302,11 @@ Windows 以 Node.js 24.22.3／pnpm 11.19.0 通過資產與地圖驗證、typeche
 - **Deliverables**：可展示 vertical slice、測試結果、已知差異與風險紀錄。
 - **Acceptance criteria**：兩 client 同圖跑跳、同 monster ID／HP、往返兩圖，150ms RTT 下可操作；清楚標示 dev identity／無正式儲存。
 - **Required tests**：端對端固定 scenario、短暫掉線、wrong protocol／map hash、input flood 不加速、owner-channel routing isolation smoke。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **驗收紀錄（2026-11-25）**。Windows 使用 Node.js 24.22.3／pnpm 11.19.0。資產（7 個 sprite）、七圖與 12 個方向傳送門、typecheck、lint、格式、套件邊界、368 項 Vitest 與正式建置通過。Chromium smoke 先跑多人 5／5，再跑其餘 14／14。與直接 discovery 比對，19 項各出現一次。列出的結果來自本機工作樹，本次變更尚待 Ubuntu CI。
+- **雙瀏覽器**。Chromium 159.0.8154.6／SwiftShader，桌面鍵盤與 667 × 375 橫向觸控在雙向各 75 ms 的 WebSocket 延遲設定下同房跑跳、看到同一 Slime ID／HP，完成 M1 ↔ Village 往返與短暫斷線重連。虛空死亡後以同一角色與 canvas 回 Village，故意延後目的地入房確認也可從目的地恢復。UI 標示開發用匿名身分與記憶體暫存。 [瀏覽器驗收](../tests/smoke/multiplayer.spec.mjs)
+- **權威與生命週期**。交接先準備兩房狀態，再於同一 world tick 步進前提交。準備拋錯保留來源，提交後通知失敗保留目的席位。回歸覆蓋單一 body／綁定、20 席限制、房間銷毀、舊 ticket／epoch、本人 checkpoint、版本與地圖 hash 拒絕，以及大量輸入與正常送幀位移相同。 [決定性測試](../apps/server/test/world-travel.test.mjs) · [WebSocket 測試](../apps/server/test/map-room.test.mjs)
+- **量測初值與限制**。Windows 11／Core i7-1355U 在 17.66 秒內推進 531 ticks，含 157 個額外補跑 ticks。218 次單 tick 喚醒的耗時 p95／p99 為 1.12／8.29 ms。代理實測單向延遲中位數為 84.32–86.52 ms，差額包含本機排程。桌面上／下行為 4.08／4.74 KiB/s，觸控為 3.07／4.63 KiB/s，僅計 WebSocket payload。Vite 主 bundle 為 596.43 kB 並有大小提示。實機與多房持續負載留待 M8.2／M8.3。
 
 ## 6. M4 — Shared Combat & Monsters（5 tasks）
 
@@ -309,6 +315,7 @@ Windows 以 Node.js 24.22.3／pnpm 11.19.0 通過資產與地圖驗證、typeche
 - **Task ID**：M4.1
 - **目標**：以 server simulation 產生三種共享怪物行為。
 - **範圍**：Slime／Mushroom／Bat data、spawn／patrol／aggro／chase／attack／return、leash／edge／flight bounds；先以 M1 與 fixture maps 驗證。
+- **實作順序**：先將 MapRuntime 的暫時 `MonsterFixture` 權威狀態遷入 `SimulationState.map.monsters`，再擴充 AI。沿用雙客戶端 ID／HP 一致、跨房隔離與重入的回歸。 [架構契約](ARCHITECTURE.md#7-shared-monster-與-reward-pipeline)
 - **Dependencies**：M3.5、M0.4。
 - **Deliverables**：monster models／FSM、spawn director、各 archetype traces。
 - **Acceptance criteria**：同 room 一份 AI；ground monster 不跌出 patrol segment、Bat 不穿 solid；return 重置 encounter／HP。
@@ -603,7 +610,7 @@ Windows 以 Node.js 24.22.3／pnpm 11.19.0 通過資產與地圖驗證、typeche
 | 未決項 | 目前 default | 負責 task | 完成決策的證據 |
 | --- | --- | --- | --- |
 | Stack 精確版本／Node LTS／PG driver | 指定 stack，不要求 latest major；選相容且受支援組合 | M0.1 | 版本矩陣、lockfile、build／adapter smoke |
-| Browser automation／load driver | Vitest＋headless TS harness；browser tool 尚待選型 | M0.3、M3.5 | 可重播 two-browser scenario、fault controls |
+| Browser automation／load driver | Vitest＋headless TS harness，瀏覽器使用 Playwright Chromium | M0.3、M3.5 | 可重播雙瀏覽器情境、WebSocket 延遲與斷線控制 |
 | Portal 實際座標與 map 節奏 | GAME_DESIGN dimensions／IDs／safe spawn contract | M2.1–M2.3 | Tiled files、validator、walkthrough |
 | 最終資產／命名／授權 | 原創 placeholders、license manifest | M2.4、M8.2 | 原始資產與授權來源 |
 | EXP／party／loot tuning | GAME_DESIGN 明確初值，不做熱更新 | M6.5、M8.3 | playtest 量測、balanceVersion／tests |

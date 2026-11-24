@@ -41,13 +41,17 @@ export function attachBrowserInput(surface: HTMLElement, signal: AbortSignal) {
   const options = { signal }
   const enabled = () => !portrait.matches && !document.hidden
 
-  function clear() {
-    input.clear()
-    const pointers = [...captures]
-    captures.clear()
-    for (const [id, button] of pointers) {
+  function releasePointers(preserveUp: boolean) {
+    for (const [id, button] of captures) {
+      if (preserveUp && button.dataset.inputControl === 'up') continue
+      captures.delete(id)
       if (button.hasPointerCapture(id)) button.releasePointerCapture(id)
     }
+  }
+
+  function clear() {
+    input.clear()
+    releasePointers(false)
   }
 
   surface.addEventListener(
@@ -106,5 +110,12 @@ export function attachBrowserInput(surface: HTMLElement, signal: AbortSignal) {
     pointerOptions
   )
 
-  return { ...input, clear }
+  return {
+    ...input,
+    clear,
+    clearForRoomChange() {
+      input.clearForRoomChange()
+      releasePointers(true)
+    },
+  }
 }

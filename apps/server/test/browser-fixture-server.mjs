@@ -3,12 +3,12 @@ import { Client } from '@colyseus/sdk'
 import { WebSocketTransport } from '@colyseus/ws-transport'
 import { loadGrayboxGameData, serializeMapManifest } from '@viesma/game-data'
 import { MapRoomSchema } from '@viesma/network-colyseus'
-import { mapRoomJoinedMessage, mapRoomName, movementCheckpointMessage, PROTOCOL_VERSION } from '@viesma/protocol'
+import { mapRoomJoinedMessage, mapRoomName, movementCheckpointMessage, PROTOCOL_VERSION, villageMapRoomName } from '@viesma/protocol'
 import { createHash, randomUUID } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
 import { clearInterval, setInterval } from 'node:timers'
 import { URL } from 'node:url'
-import { createMapRoomClass } from '../dist/adapters/map-room.js'
+import { createDestinationRoom, createMapRoomClass } from '../dist/adapters/map-room.js'
 import { createWorldCoordinator } from '../dist/runtime/world-coordinator.js'
 
 function joinVersion(data) {
@@ -31,12 +31,21 @@ export async function joinSmokePeer(baseURL) {
 export async function startBrowserFixtureServer() {
   const data = loadGrayboxGameData()
   const version = joinVersion(data)
+  let latestTick = 0
+  let tickCosts
   const world = createWorldCoordinator(data, version.mapContentHash, {
     clock: { nowMilliseconds: () => performance.now() },
     nextId: randomUUID,
+    createDestination: createDestinationRoom,
     onBacklog() {},
     schedule(wake, milliseconds) {
-      const timer = setInterval(wake, milliseconds)
+      const timer = setInterval(() => {
+        if (!tickCosts) return wake()
+        const before = latestTick
+        const start = performance.now()
+        wake()
+        if (latestTick === before + 1) tickCosts.push(performance.now() - start)
+      }, milliseconds)
       return () => clearInterval(timer)
     },
   })
@@ -44,23 +53,27 @@ export async function startBrowserFixtureServer() {
   const server = new Server({ transport, gracefullyShutdown: false, greet: false })
   const ownerAcks = new WeakMap()
   let room
-  const MapRoom = createMapRoomClass(
-    {
-      ...world,
-      createRoom() {
-        room = world.createRoom()
-        const checkpoint = room.checkpoint
-        room.checkpoint = (connection) => {
-          const result = checkpoint(connection)
-          if (result) ownerAcks.set(connection, result.ackInputSeq)
-          return result
-        }
-        return room
-      },
+  const observedWorld = {
+    ...world,
+    createRoom(mapId, roomId) {
+      const runtime = world.createRoom(mapId, roomId)
+      if (mapId === 'm1') room = runtime
+      const advance = runtime.advance
+      runtime.advance = (frame, now) => {
+        advance(frame, now)
+        latestTick = frame.tick
+      }
+      const checkpoint = runtime.checkpoint
+      runtime.checkpoint = (connection) => {
+        const result = checkpoint(connection)
+        if (result) ownerAcks.set(connection, result.ackInputSeq)
+        return result
+      }
+      return runtime
     },
-    version
-  )
-  server.define(mapRoomName, MapRoom)
+  }
+  server.define(mapRoomName, createMapRoomClass(observedWorld, version))
+  server.define(villageMapRoomName, createMapRoomClass(observedWorld, version, 15, 'village'))
   await server.listen(0, '127.0.0.1')
   const address = `127.0.0.1:${transport.server.address().port}`
   return {
@@ -69,9 +82,29 @@ export async function startBrowserFixtureServer() {
       const seat = await matchMaker.joinOrCreate(mapRoomName, options)
       return { ...seat, publicAddress: address }
     },
+    drop({ roomId, sessionId }) {
+      const connection = matchMaker.getLocalRoomById(roomId)?.clients.getById(sessionId)
+      if (!connection) return false
+      connection.ref.terminate()
+      return true
+    },
+    players({ roomId }) {
+      return [...(matchMaker.getLocalRoomById(roomId)?.state.players.keys() ?? [])]
+    },
     ownerAck({ roomId, sessionId }) {
       const connection = matchMaker.getLocalRoomById(roomId)?.clients.getById(sessionId)
       return connection && ownerAcks.get(connection)
+    },
+    measureTicks() {
+      const start = performance.now()
+      const firstTick = latestTick
+      const firstCatchUp = world.tickDiagnostics().catchUpTicks
+      const costs = []
+      tickCosts = costs
+      return () => {
+        tickCosts = undefined
+        return { costs, ticks: latestTick - firstTick, catchUpTicks: world.tickDiagnostics().catchUpTicks - firstCatchUp, start }
+      }
     },
     queueFixtureEvent: (event) => room?.queueMonsterFixtureEvent(event),
     close: () => server.gracefullyShutdown(false),

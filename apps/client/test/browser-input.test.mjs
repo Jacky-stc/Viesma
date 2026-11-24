@@ -19,6 +19,7 @@ function attachInput() {
     touchControls.map(({ control }) => {
       const captured = new Set()
       const button = Object.assign(new EventTarget(), {
+        dataset: { inputControl: control },
         setPointerCapture: (id) => captured.add(id),
         hasPointerCapture: (id) => captured.has(id),
         releasePointerCapture: (id) => captured.delete(id),
@@ -39,6 +40,7 @@ function attachInput() {
     portrait,
     controller,
     sample: input.sample,
+    clearForRoomChange: input.clearForRoomChange,
     keyDown: (code, options) => emit(surface, 'keydown', { code, ...options }),
     keyUp: (code) => emit(surface, 'keyup', { code }),
     pointerDown: (control, pointerId) => {
@@ -86,6 +88,26 @@ describe('playground browser input', () => {
     keyUp('Space')
     keyDown('Space')
     expect(sample().jumpPressed).toBe(true)
+  })
+
+  it('clears movement and queued edges at a room change while preserving held keyboard and touch Up', () => {
+    const { keyDown, keyUp, pointerDown, pointerEnd, sample, clearForRoomChange } = attachInput()
+    keyDown('KeyW')
+    const up = pointerDown('up', 1)
+    const right = pointerDown('right', 2)
+    keyDown('Space')
+    clearForRoomChange()
+    expect(up.hasPointerCapture(1)).toBe(true)
+    expect(right.hasPointerCapture(2)).toBe(false)
+    expect(sample()).toMatchObject({ moveX: 0, jumpPressed: false, portalPressed: false })
+    keyUp('KeyW')
+    keyDown('ArrowUp')
+    expect(sample().portalPressed).toBe(false)
+    keyUp('ArrowUp')
+    pointerEnd('pointerup', 1, up)
+    keyDown('KeyW')
+    expect(sample().portalPressed).toBe(true)
+    expect(sample().portalPressed).toBe(false)
   })
 
   it.each(['window blur', 'surface blur', 'pagehide', 'visibility', 'rotation'])(

@@ -1,6 +1,7 @@
 export { createFixedTickDriver, fixedDeltaSeconds, maxCatchUpTicks, ticksPerSecond } from './fixed-tick.js'
 export type { FixedTick, FixedTickAdvance, FixedTickDriver, MonotonicClock } from './fixed-tick.js'
 export {
+  canUseGroundedInteraction,
   createLocalWorld,
   findOverlappingPortal,
   type GuideInteraction,
@@ -24,10 +25,12 @@ export {
   type PlayerInputCommand,
 } from './movement-input.js'
 export { createPlayerController, type PlayerController } from './player-controller.js'
-export type { PlayerLifecycleEvent, PlayerVitalEffect } from './player-lifecycle.js'
+export { respawnPlayer, type PlayerLifecycleEvent, type PlayerVitalEffect } from './player-lifecycle.js'
 export {
   createPlayer,
   getPlayerPresentationState,
+  neutralMovement,
+  placePlayerAtSpawn,
   type FacingDirection,
   type PlayerAction,
   type PlayerActionEvent,

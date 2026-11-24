@@ -39,6 +39,7 @@ export function Playground() {
   const [mode, setMode] = useState<Mode>('interactive')
   const [presentation, setPresentation] = useState<PlaygroundPresentation>()
   const [multiplayer, setMultiplayer] = useState<MultiplayerPresentation>()
+  const [multiplayerStatus, setMultiplayerStatus] = useState('')
   const [actions, setActions] = useState<readonly AuxiliaryAction[]>([])
   const [failed, setFailed] = useState(false)
   const interactive = active && mode === 'interactive'
@@ -77,7 +78,7 @@ export function Playground() {
       .then(async () => {
         if (mode === 'multiplayer') {
           const { runMultiplayer } = await import('../multiplayer/run-multiplayer')
-          return runMultiplayer(host, surface, setMultiplayer, failedStartup, controller.signal)
+          return runMultiplayer(host, surface, setMultiplayer, setMultiplayerStatus, failedStartup, controller.signal)
         }
         return runPlayground(host, surface, mode, setPresentation, setActions, controller.signal, takeGuideClose, takeDebugDamage)
       })
@@ -90,6 +91,7 @@ export function Playground() {
     pendingGuideClose.current = undefined
     setPresentation(undefined)
     setMultiplayer(undefined)
+    setMultiplayerStatus('')
     setActions([])
     setFailed(false)
   }
@@ -105,6 +107,7 @@ export function Playground() {
         <div>
           <h1>Viesma</h1>
           <p aria-label="目前地圖">{(online ? multiplayer?.mapName : presentation?.mapName) ?? 'Beginner 平台測試場'}</p>
+          {online && <p>開發用匿名身分 · 進度僅暫存於伺服器記憶體</p>}
           {interactive && presentation?.nearPortal && <p>按 ↑／W 或點觸控 ↑ 進入傳送門</p>}
           {interactive && presentation?.canInteractWithGuide && !guideInteraction && <p>按 E 或點觸控「互動」與 Guide 對話</p>}
         </div>
@@ -184,7 +187,7 @@ export function Playground() {
               hidden={!controlsReady}
             >
               <div className="playground-directions">
-                {touchControls.slice(0, online ? 2 : 3).map(({ control, label, text }) => (
+                {touchControls.slice(0, 3).map(({ control, label, text }) => (
                   <button
                     key={control}
                     type="button"
@@ -211,7 +214,7 @@ export function Playground() {
             {controlsReady && <p className="playground-rotate">請將裝置轉為橫向以操作。</p>}
           </>
         )}
-        {(!active || failed || !(online ? multiplayer : presentation)) && (
+        {(!active || failed || !(online ? multiplayer : presentation) || (online && multiplayerStatus)) && (
           <p
             className="playground-status"
             role={failed ? 'alert' : 'status'}
@@ -221,7 +224,7 @@ export function Playground() {
                 ? '多人場景已中斷或無法啟動，請確認本機伺服器與 WebGL 後重新載入。'
                 : '無法啟動場景，請確認瀏覽器支援 WebGL。'
               : online
-                ? '連線至 M1…'
+                ? multiplayerStatus || '連線至 M1…'
                 : active
                   ? '載入場景中…'
                   : '場景已卸載'}
@@ -236,7 +239,7 @@ export function Playground() {
         <h2 id="playground-help-title">操作說明</h2>
         <p>點一下場景或用 Tab 移入焦點，再使用以下按鍵。</p>
         {mode === 'multiplayer' ? (
-          <p>可使用 ←／A、→／D 與 Space 移動及跳躍。手機橫向顯示觸控按鈕。</p>
+          <p>可使用 ←／A、→／D 與 Space 移動及跳躍。站在 Village 或 M1 的傳送門內，按 ↑／W 或觸控 ↑ 往返。</p>
         ) : (
           <>
             <ul>
@@ -290,7 +293,7 @@ export function Playground() {
           {multiplayer && !failed && (
             <>
               <span>
-                開發用多人測試 · {stateLabels[multiplayer.state]} · 朝{multiplayer.facing === 'left' ? '左' : '右'}
+                {stateLabels[multiplayer.state]} · 朝{multiplayer.facing === 'left' ? '左' : '右'}
               </span>
               <span>
                 HP {multiplayer.hp} / {multiplayer.maxHp}

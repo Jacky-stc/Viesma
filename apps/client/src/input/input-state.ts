@@ -36,6 +36,10 @@ export function createInputState() {
       held.clear()
       edges.clear()
     },
+    clearForRoomChange() {
+      for (const [source, control] of held) if (control !== 'up') held.delete(source)
+      edges.clear()
+    },
     sample(): InputSample {
       // Jump 已在合併後的按下轉換鎖存，讓 tick 之間的短按也能被消費一次。
       const movement = normalizeMovementInput({ left: isHeld('left'), right: isHeld('right'), jump: edges.has('jump') }, false)

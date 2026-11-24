@@ -177,12 +177,12 @@ Client 以同樣30Hz跑 local physics，render 以 `requestAnimationFrame` 自�
 
 ### 4.6 M3.1 M1 開發房
 
-- 本機 server 註冊 `map` 房型，地圖固定為 M1。Colyseus 管理 WebSocket、一次性 seat reservation、逾時及自動銷毀。框架以連線加預留席位執行 20 席上限。Room 在驗證版本後再登記 active CharacterActor，並同樣限制 20 名。開發角色與 connectionEpoch 均由 server 指派，生命週期為單次連線。
+- 本機 server 註冊 `map`（M1）及 `village` 房型。開發角色初次進入 M1。Colyseus 管理 WebSocket、一次性 transport seat、逾時及空房銷毀。傳送與重連另由 WorldCoordinator 驗證角色所有權及 application seat。
 - 每個 server 建立一個 WorldCoordinator。第一間房註冊時啟動單一 monotonic `createFixedTickDriver`，依 map instance ID 順序同步步進各房。新房以當前 world tick 為起點。房間各自擁有 state、actor registry 與待處理輸入。補跑以每次喚醒最多 5 ticks 為限，維持 `dt = 1 / 30`，剩餘時間留到下次喚醒。補跑尚有欠步時記錄告警並暫停新連線入房，追上後恢復。最後一房離開 coordinator 時停止 scheduler。
-- Join 在 tick 邊界以伺服器載入的 `m1/spawn_from_village` 呼叫 `createPlayer`。Leave 立即撤銷輸入資格、釋放 actor 與待處理輸入，其 body 在下一個 tick 移除。房間銷毀時清空房內執行狀態並解除 scheduler 註冊。
+- 初次 Join 在 tick 邊界以 `m1/spawn_from_village` 建立 body。主動離房立即撤銷輸入並釋放角色席位，下一 tick 移除 body。異常斷線進入 §6 的重連保留期。房間銷毀會清空房間狀態並解除 scheduler 註冊。
 - 線上 `InputFrame` 驗證 exact fields、版本、連線／地圖 epoch、序號和型別。每角色以 40/s、burst 80 限流，WebSocket payload 上限為 4 KiB。M3.1 使用單幀暫存，M3.2 接入 §5.1 的有界佇列與 §5.2 的本人 checkpoint。線上角色可左右移動及跳躍，Attack edge 保留供後續任務使用。
 - `@viesma/protocol` 定義 wire DTO。Server 把 domain state 投影成角色 ID、左上角座標、朝向、狀態與 HP／MaxHP，再由 `@viesma/network-colyseus` 的 Schema 送出。公開房間欄位包含 map ID、map instance ID、內容 hash 與 server tick。Colyseus 每 100 ms 評估一次最新快照。只有本人收到自己的角色 ID 與連線／地圖 epoch。
-- Browser 以同一份地圖資料計算版本資訊並檢查入房版本。線上模式限 M1、匿名開發角色與即時移動，使用 §5.3 的本人預測。測試場的本地模式仍提供七圖走訪。目前進入 void 的角色保持 Death，重新加入會取得新角色。Village 重生 handoff、傳送及同角色重連由 M3.4 接入。
+- Browser 以同一份地圖資料計算版本資訊並檢查入房版本。線上模式提供匿名開發角色、即時移動、M1 ↔ Village 傳送及重連。本地模式提供七圖走訪。
 
 ## 5. Input protocol 與同步
 
@@ -197,7 +197,7 @@ Client 以同樣30Hz跑 local physics，render 以 `requestAnimationFrame` 自�
 | `EquipItem`／`UnequipItem`／`ConsumeItem` | `requestId, sessionEpoch, itemInstanceId/slot, expectedCharacterVersion` | version stale 回傳最新 snapshot，不能套用 client bag |
 | `PartyCommand` | `requestId, type, targetId/inviteId, expectedPartyRevision` | PartyService 序列處理；不信任 client roster |
 
-Connection 在入房時綁定 account／character，不允許 payload 冒用其他 owner。非 input messages 亦帶 protocolVersion，mutation envelope 帶目前 connectionEpoch；所有欄位做 schema、大小、數值有限性與 rate validation。
+入房先驗證版本與連線資格。M3.4 的 `InteractPortal` 使用表列的三個欄位，由已驗證的實際 socket 綁定角色及連線世代。每綁定使用單調遞增的安全整數 `requestId`，同時最多一個待處理請求。後續經濟與隊伍 mutation envelope 帶 `protocolVersion` 和 `connectionEpoch`，並驗證 schema、大小、數值與速率。
 
 Input seq 在 connection epoch 內單調遞增。Server 拒絕舊 epoch、已見的序號及超出「連線經過時間換算的 30 Hz ticks 加 80」的過遠序號。每角色使用同一個六幀 FIFO，每 tick 最多套用一幀。滿隊時淘汰最舊的純移動幀或衝突幀，保留有效 jump／attack 邊緣的原始序號、方向及順序。若六幀都是有效邊緣，新幀拒收並結案。最新待處理幀收到異內容的同序號重送時標為衝突，後續不套用。已淘汰或拒收的序號不能靠重送復活。
 
@@ -208,7 +208,7 @@ Input seq 在 connection epoch 內單調遞增。Server 拒絕舊 epoch、已見
 ### 5.2 Server → client
 
 - **Public Schema，10 Hz**。房間包含 `serverTick`、`mapId`、`mapInstanceId` 與 `mapContentHash`。角色投影含位置、朝向、狀態、HP／MaxHP、`mapEpoch` 和 `lifeStartedTick`。`mapEpoch` 屬於個別角色。測試怪物投影含 `monsterId`、archetype、腳底中心位置、朝向、巡邏狀態與 HP／MaxHP。以房間 tick 為共用時間軸。Server 建立獨立的 plain DTO，Colyseus 以 ID 更新或移除 Schema 項目。連線 epoch 與本人 checkpoint 仍走 owner channel。
-- **Self movement checkpoint，10 Hz owner-only**。`MovementCheckpoint` 在同 tick 的 public patch 之後由 server 專門發給本人，帶版本、角色、map instance、connection／map epoch、生命開始 tick 及 server tick。`ackInputSeq` 是累積結案邊界，初值為 `null`，在權威步進完成後才更新。它涵蓋已套用、衝突、過期、淘汰或滿隊拒收的幀，以及較新序號關閉的缺口。ACK 不跨過最早未決幀，佇列清空後涵蓋已結案的尾端。控制器自己的 `lastProcessedInputSeq` 和 `lastInputTick` 則記錄實際套用的輸入。完整狀態包含 position、velocity、grounded／void、水平意圖、jump buffer／coyote、facing、locomotion、action 及最近受擊 tick。HP／MaxHP 沿用公開投影。Wire protocol 維持 v3。
+- **Self movement checkpoint，10 Hz owner-only**。`MovementCheckpoint` 在同 tick 的 public patch 之後由 server 專門發給本人，帶版本、角色、map instance、connection／map epoch、生命開始 tick 及 server tick。`ackInputSeq` 是累積結案邊界，初值為 `null`，在權威步進完成後才更新。它涵蓋已套用、衝突、過期、淘汰或滿隊拒收的幀，以及較新序號關閉的缺口。ACK 不跨過最早未決幀，佇列清空後涵蓋已結案的尾端。控制器自己的 `lastProcessedInputSeq` 和 `lastInputTick` 則記錄實際套用的輸入。完整狀態包含 position、velocity、grounded／void、水平意圖、jump buffer／coyote、facing、locomotion、action 及最近受擊 tick。HP／MaxHP 沿用公開投影。
 - **Reliable visual messages**：attack／damage／death／respawn event，含 eventId 與 tick；純顯示事件可在 reconnect 丟棄，不重播舊 damage numbers。EventId 做短期去重。
 - **Owner-only messages**：character／bag／equipment snapshot、loot snapshot／delta、request result、reward receipt。`privateRevision` 不連續時重新要求完整 snapshot；重新入房／重連一定重建完整 owner view。
 - **Party-only messages**：PartyService 對所有 connected members 發送 revisioned full snapshot，包含同／跨 map 的 member 摘要。不同 party 收不到 invite／roster 私有資料。
@@ -228,7 +228,7 @@ M3.3 使用公開 `serverTick` 建立遠端角色／怪物的 client presentatio
 - 缺少後續快照時，遠端活角色可依最後兩筆有效快照的速度，最多外推 100 ms，再停在外推終點直到更新。死亡角色與怪物停在最後權威位置。外推只用於畫面，沒有碰撞或輸入重播。Server 不回溯舊 client attack time，高 latency 的近戰命中體驗留待後續實測。
 - **瀏覽器診斷**。`?multiplayerDiagnostics=1` 啟用 canvas 診斷屬性，包含重播筆數、校正模式與距離、歷史溢出、snapshot tick、遠端取樣、公開怪物投影及 sprite 清理。預設關閉，跳過診斷序列化與 DOM 讀寫。本人 ACK 留在 owner checkpoint，Chromium 測試由隔離的伺服器 fixture 驗證實際送出的 ACK。
 
-Server 公告 `protocolVersion`、`balanceVersion` 與 `mapContentHash`。入房須與 server 的三個值一致，差異要求 reload。`schemaVersion` 由各端載入資料時檢查。M0.4 提供版本比對契約，M3.1 將它接入房間驗證。M3.2 的 owner checkpoint 使用 v2，M3.3 更新兩端固定使用的 Schema 並提升到 v3。遊戲只以共用 TypeScript 控制器進行本人預測及權威步進。
+Server 公告 `protocolVersion`、`balanceVersion` 與 `mapContentHash`。所有入房、傳送及重連均檢查三個值。`schemaVersion` 由各端載入資料時檢查。M3.4 將 client 和 server 一同升至 v4，新增本人 join 憑證及傳送訊息。v3 client 須重新載入。InputFrame 與 MovementCheckpoint 保留欄位與累積 ACK 語意。本人預測與權威步進共用 TypeScript 控制器。
 
 ## 6. Map authoring、room 與 transfer
 
@@ -236,17 +236,17 @@ Server 公告 `protocolVersion`、`balanceVersion` 與 `mapContentHash`。入房
 
 MapRoom 持有一份 shared monster simulation，`maxClients=20` 加上 application seat registry 的 reservation 檢查。Connection seat 與 character seat 分開計數，短暫 socket handover 不能多出第21個 character。Room key 為 `(nodeBootId, mapId, instanceSequence)`；map instance 不持久化，personal loot 另有可 rebind durable records。
 
-M3.4 以穩定的 `characterId` 跨房及重連。同一角色至多有一個有效連線綁定、一份權威 body，且每個 world tick 至多步進一次。先保留目的席位，在 world tick 邊界原子交接，再由新綁定接收輸入及 owner-only checkpoint。舊連線的輸入、離房與逾時回呼均需核對當前綁定。提交前失敗回來源，提交後從目的地恢復。
+M3.4 由 WorldCoordinator 獨占角色路由，以穩定的 `characterId` 識別角色，以具體 socket 綁定及 `connectionEpoch` 驗證私有通道。MapRuntime 擁有角色席位、輸入佇列與唯一的 simulation body。預留的目的席位在交接前沒有 body 或輸入權限。同一角色每個 world tick 至多步進一次，只有當前綁定可收到 owner-only checkpoint。舊連線的輸入、離房與逾時回呼均需核對當前綁定。提交前失敗回來源，提交後從目的地恢復。
 
-Transfer state machine：
+1. ↑／W／觸控 ↑ 合併為單次按下邊緣。WorldCoordinator 在步進前驗證當前 socket、`mapEpoch`、request ID、存活、接地、動作及權威 AABB 交疊。目的 room 和 spawn 取自既有的 Village ↔ M1 portal。保留來源席位並清除移動輸入，待交接的 body 停在來源。
+2. 對同地圖選擇最早有空席的 room，無 room 時建立一間，已存在的目的房皆滿時回報失敗。Active、reconnect 與 incoming reservation 共用每房 20 個角色席位。Colyseus 另限制 20 個 transport 席位。整段交接最多 10 秒，保留目的席位後發 owner-only `TransferOffer`。一次性 ticket 綁定角色、來源綁定、目的 room 及下一個 `mapEpoch`。Client 用 ticket 和自己的 reconnect 憑證向目的 room 入房。
+3. 目的 socket 通過驗證後暫候，直到下一個可入房的 world tick。WorldCoordinator 先驗證雙方席位並準備離開與到達狀態。準備成功後，在房間步進前依序移除來源席位與 body、安裝目的席位與 body、更新路由與世代並銷毀 ticket。傳送保留身分、生命與 HP／MP，重置移動、速度、朝向與生成保護。路由生效後才對目的 socket 發 `MapRoomJoined` 並關閉舊連線。目的通知失敗時保留目的角色席位供重連。Client 等待匹配的公開狀態和本人 checkpoint 後顯示目的房。
+4. 提交前銷毀或拒絕目的連線、收到 `CancelTransfer`、滿房或逾時時，釋放預留席位並恢復來源的中立狀態與輸入資格。本人用 `TransferFailure` 的 request ID 和錯誤碼對應請求。舊 ticket 與舊 socket 回呼不能改變新綁定。`WORLD_TICK_BACKLOG` 暫停新入房與交接提交，過期仍照 monotonic 時間處理。
+5. 異常斷線立即撤銷輸入、清空待處理輸入及方向／跳躍意圖，保留唯一 body 及席位 30 秒。提交前以來源恢復，提交後以目的地恢復。已知交接結果遺失時，client 依序嘗試 offer 的目的 room 與原 room，只有角色權威位置可接受。逾時後才收到目的入房確認時，client 以斷線方式關閉該連線，讓已提交角色保留重連資格。主動離房釋放角色，保留期屆滿也釋放角色及席位。斷線中 Death 保留於目前 room，重連後在重生延遲屆滿時接上 Village handoff。
 
-1. `ACTIVE → RESERVING`：validate source portal／actor，source seat 保留且停止 action，發 neutral；尚未在 destination 創建 body。
-2. `RESERVING → HANDOFF`：destination seat reserve 成功，建立10秒一次性 transfer ticket，綁定 account、character、來源／目的 room、mapEpoch+1。`CharacterActor.currentMap` 只有 coordinator 可改。
-3. Client 連 destination；server 驗證 ticket 後在一個 coordinator turn 移除來源 body，更新 actor location／epoch，再創建 destination body；不能同時存在兩份 combat body。
-4. 成功確認後釋放 source reservation、關閉舊 room connection，發全量 public／private state。Pending reward 使用 death-time snapshot，與 transfer 不互相取消。
-5. Timeout／join failure：若尚未 commit handoff，回來源有效 spawn 並恢復原 seat；若已 commit，從 destination reconnect。兩邊 room 都消失則登入後安全回 Village。ticket consume idempotent，過期不可另開 body。
+匿名角色的 reconnect 憑證由 server 產生，只能用於該角色的保留席位，活躍綁定存在時拒絕重連。成功重連輪替憑證及 `connectionEpoch`。在新連線收到有效輸入前，保留本次出示的憑證供入房確認遺失時重試。有效傳送請求或 ticket claim 也可完成確認。憑證僅在本人訊息、matchmaking POST body 及兩端記憶體中傳遞。公開投影、URL、診斷及應用日誌省略憑證。
 
-PartyService 不隨 map connection dispose；server 以 characterId 找現在的 connection 路由 private／party events。保留 source 的接線與 ticket 消費由 M3.4 驗證，不能簡化成「先 leave 再盲目 join」。
+Browser 在交接期間暫停輸入，切換成功後由目的 room 及 checkpoint 重建 prediction、序號、校正與遠端插值，清理 peer／monster sprite 並以目的圖重算 camera，沿用單一 canvas。實體 Up 的按住來源保留至放開。離開舊 room 後解除 listener，新狀態由新的房間與角色世代驗證。M7 接入正式帳號驗證、play lease 與 durable recovery。
 
 ## 7. Shared monster 與 reward pipeline
 

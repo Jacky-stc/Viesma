@@ -1,9 +1,28 @@
 export { PROTOCOL_VERSION, checkJoinVersion, type JoinVersion, type JoinVersionResult } from './join-version.js'
 export { parseInputFrame, parseMapRoomJoin } from './map-room.js'
 export type { InputFrame, MapRoomJoin, PublicMapRoom, PublicMonster, PublicPlayer, PublicRoomHeader } from './map-room.js'
+export {
+  parseMapAdmission,
+  parseMapRoomSession,
+  parsePortalRequest,
+  parseTransferCancellation,
+  parseTransferFailure,
+  parseTransferOffer,
+  type MapAdmission,
+  type MapRoomSession,
+  type OnlineMapId,
+  type PortalRequest,
+  type TransferFailure,
+  type TransferOffer,
+} from './map-travel.js'
 export { parseMovementCheckpoint, type MovementCheckpoint } from './movement-checkpoint.js'
 
 export const mapRoomName = 'map'
+export const villageMapRoomName = 'village'
 export const inputFrameMessage = 'InputFrame'
 export const mapRoomJoinedMessage = 'MapRoomJoined'
 export const movementCheckpointMessage = 'MovementCheckpoint'
+export const interactPortalMessage = 'InteractPortal'
+export const transferOfferMessage = 'TransferOffer'
+export const transferFailureMessage = 'TransferFailure'
+export const cancelTransferMessage = 'CancelTransfer'

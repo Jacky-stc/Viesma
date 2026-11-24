@@ -51,7 +51,7 @@ interface LocalWorldStepResult {
   readonly events: readonly LocalWorldEvent[]
 }
 
-function canUseGroundedInteraction(player: SimulationPlayer): boolean {
+export function canUseGroundedInteraction(player: SimulationPlayer): boolean {
   return player.vitals.hp > 0 && player.action.kind === 'none' && player.physics.grounded && !player.physics.inVoid
 }
 

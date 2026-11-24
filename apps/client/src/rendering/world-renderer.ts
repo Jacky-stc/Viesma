@@ -16,6 +16,7 @@ interface PlayerSize {
 }
 
 export interface WorldRenderer {
+  resetRoom(): void
   render(
     frame: PlayerVisualFrame & {
       readonly map: NormalizedMap
@@ -77,13 +78,18 @@ export async function createWorldRenderer(
     const monsters = new Container()
     const monsterViews = new Map<string, ReturnType<typeof createSharedMonsterView>>()
     let mapSprites: ReturnType<typeof createMapSpriteView> | undefined
+    function clearRoomSprites() {
+      for (const view of peerViews.values()) view.root.destroy({ children: true, context: true })
+      for (const view of monsterViews.values()) view.root.destroy()
+      peerViews.clear()
+      monsterViews.clear()
+    }
     releaseAssets = () => {
       mapSprites?.destroy()
       player.root.destroy({ children: true, context: true })
+      clearRoomSprites()
       peers.destroy({ children: true, context: true })
-      peerViews.clear()
       monsters.destroy({ children: true })
-      monsterViews.clear()
       if (diagnostics) {
         delete host.dataset.monsterSprites
         delete host.dataset.peerSprites
@@ -106,6 +112,7 @@ export async function createWorldRenderer(
     let activeMap: NormalizedMap | undefined
     let mapGraphics: Graphics | undefined
     return {
+      resetRoom: clearRoomSprites,
       render(frame) {
         if (disposed || size.width < 1 || size.height < 1) return
         const { map } = frame

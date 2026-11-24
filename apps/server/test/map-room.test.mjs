@@ -60,8 +60,9 @@ function advance() {
 function observe(room) {
   const connection = { room, binding: undefined, checkpoints: [] }
   room.reconnection.enabled = false
-  room.onMessage(mapRoomJoinedMessage, (binding) => {
+  room.onMessage(mapRoomJoinedMessage, ({ reconnectToken, ...binding }) => {
     connection.binding = binding
+    connection.reconnectToken = reconnectToken
   })
   room.onMessage(movementCheckpointMessage, (payload) => {
     connection.checkpoints.push({ checkpoint: parseMovementCheckpoint(payload), publicTick: room.state.serverTick })
@@ -103,6 +104,7 @@ test('shares M1 through the actual room lifecycle and isolates another room', as
   const spawn = players().find(({ characterId }) => characterId === first.binding.characterId)
   expect(spawn).toBeDefined()
   expect(JSON.stringify(room.state)).not.toContain(first.binding.connectionEpoch)
+  expect(JSON.stringify(room.state)).not.toContain(first.reconnectToken)
   expect(other.room.state.players.has(first.binding.characterId)).toBe(false)
   for (const connection of [first, second, other]) {
     await expect
@@ -123,7 +125,7 @@ test('shares M1 through the actual room lifecycle and isolates another room', as
   await expect(client.joinById(room.roomId, { ...version, protocolVersion: 999 }, MapRoomSchema)).rejects.toThrow(
     'PROTOCOL_VERSION_MISMATCH'
   )
-  await expect(client.joinById(room.roomId, { ...version, protocolVersion: 2 }, MapRoomSchema)).rejects.toThrow('PROTOCOL_VERSION_MISMATCH')
+  await expect(client.joinById(room.roomId, { ...version, protocolVersion: 3 }, MapRoomSchema)).rejects.toThrow('PROTOCOL_VERSION_MISMATCH')
   await expect(client.joinById(room.roomId, { ...version, balanceVersion: 'old' }, MapRoomSchema)).rejects.toThrow(
     'BALANCE_VERSION_MISMATCH'
   )
@@ -175,14 +177,22 @@ test('shares M1 through the actual room lifecycle and isolates another room', as
     .poll(() => second.checkpoints.map(({ checkpoint }) => checkpoint.characterId))
     .toEqual(Array(3).fill(second.binding.characterId))
 
-  // 模擬非正常斷線。Server 應立即撤銷輸入，並在下一 tick 移除 body。
+  // 非正常斷線撤銷輸入並保留 body，新的 transport 座位可在保留期內重新綁定。
   const firstId = first.binding.characterId
   const severed = serverRoom.clients.getById(first.room.sessionId)
   severed.ref.terminate()
   await expect.poll(() => serverRoom.clients.length).toBe(1)
   advance()
-  await expect.poll(() => second.room.state.players.has(firstId)).toBe(false)
-  await second.room.leave()
+  await expect.poll(() => second.room.state.serverTick).toBe(12)
+  expect(second.room.state.players.has(firstId)).toBe(true)
+  const recovered = observe(await client.joinById(room.roomId, { ...version, reconnectToken: first.reconnectToken }, MapRoomSchema))
+  await expect.poll(() => recovered.binding?.characterId).toBe(firstId)
+  expect(recovered.binding.connectionEpoch).not.toBe(first.binding.connectionEpoch)
+  expect(recovered.reconnectToken).not.toBe(first.reconnectToken)
+  await expect(client.joinById(room.roomId, { ...version, reconnectToken: first.reconnectToken }, MapRoomSchema)).rejects.toThrow(
+    'MAP_ADMISSION_INVALID'
+  )
+  await Promise.all([second.room.leave(), recovered.room.leave()])
   await expect.poll(() => matchMaker.getLocalRoomById(room.roomId)).toBeUndefined()
   expect(wake).toBeTypeOf('function')
   advance()
@@ -213,6 +223,40 @@ test('keeps the 21st concurrent seat out and releases expired reservations', asy
   const replacement = observe(await client.joinById(room.roomId, version, MapRoomSchema))
   await Promise.all([room.leave(), entered[0].room.leave(), replacement.room.leave()])
   await expect.poll(() => matchMaker.getLocalRoomById(room.roomId)).toBeUndefined()
+})
+
+test('input flooding over the transport does not move a player faster than three frames per patch', async () => {
+  const paced = observe(await client.create(mapRoomName, version, MapRoomSchema))
+  const flood = observe(await client.joinById(paced.room.roomId, version, MapRoomSchema))
+  try {
+    advance()
+    await expect.poll(() => paced.room.state.players.size).toBe(2)
+    await expect.poll(() => flood.room.state.players.size).toBe(2)
+    const position = ({ binding }) => paced.room.state.players.get(binding.characterId).x
+    const start = position(paced)
+    const serverRoom = matchMaker.getLocalRoomById(paced.room.roomId)
+    let arrivals = 0
+    for (const { room } of [paced, flood]) {
+      serverRoom.clients.getById(room.sessionId).ref.on('message', () => arrivals++)
+    }
+    for (let batch = 0; batch < 5; batch++) {
+      for (let index = 1; index <= 3; index++) send(paced, batch * 3 + index, { jumpPressed: false })
+      for (let index = 1; index <= 12; index++) send(flood, batch * 12 + index, { jumpPressed: false })
+      await expect.poll(() => arrivals).toBe((batch + 1) * 15)
+      const previousTick = paced.room.state.serverTick
+      advance()
+      await expect.poll(() => paced.room.state.serverTick).toBe(previousTick + 3)
+      expect(position(flood)).toBe(position(paced))
+    }
+    expect(position(paced)).toBeGreaterThan(start)
+    for (const connection of [paced, flood]) {
+      expect(connection.checkpoints.length).toBeGreaterThan(0)
+      expect(connection.checkpoints.every(({ checkpoint }) => checkpoint.characterId === connection.binding.characterId)).toBe(true)
+    }
+  } finally {
+    await Promise.all([paced.room.leave(), flood.room.leave()])
+    await expect.poll(() => wake).toBeUndefined()
+  }
 })
 
 test('publishes fixture movement, HP and removal to both sockets and gives late joins a fresh full projection', async () => {
