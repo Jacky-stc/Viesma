@@ -320,7 +320,10 @@ Windows 以 Node.js 24.22.3／pnpm 11.19.0 通過資產與地圖驗證、typeche
 - **Deliverables**：monster models／FSM、spawn director、各 archetype traces。
 - **Acceptance criteria**：同 room 一份 AI；ground monster 不跌出 patrol segment、Bat 不穿 solid；return 重置 encounter／HP。
 - **Required tests**：target ties／dead target／grace-disconnected body仍可被攻擊／expired body移除／aggro distances／unreachable platform／leash reset／spawn count cap／same-seed replay。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **權威與決定性驗收（2026-11-25）**。共用 30 Hz simulation 步進角色與怪物，M1 每房從資料建立六隻 Slime、四隻 Mushroom。測試覆蓋空房步進、房間隔離、出生上限、固定快照順序、重連與銷毀、Slime 原始巡邏及半血／移除回歸。AI 測試涵蓋等距、死亡與保護排除、寬限期及到期移除、目標與 leash 邊界、不可達平台、Bat 飛行區及 solid、攻擊時序、Return 回滿 HP／換 encounter 與同 seed 重播。 [AI 測試](../packages/simulation/test/monster-ai.test.mjs) · [房間測試](../apps/server/test/map-runtime.test.mjs) · [重連測試](../apps/server/test/world-travel.test.mjs)
+- **Chromium 驗收**。雙客戶端在相同 server tick 核對整批怪物 ID、座標與 HP，重入及重連後沿用相同 ID。移除測試 Slime 時只清理其 sprite，150 ms RTT 的桌面鍵盤、橫向觸控、傳送、死亡回村與單 canvas 回歸通過。 [瀏覽器測試](../tests/smoke/multiplayer.spec.mjs)
+- **本機檢查**。Windows、Node.js 24.22.3／pnpm 11.19.0。資產、七圖、typecheck、lint、格式、套件邊界、383 項 Vitest 和正式建置通過。循既有 smoke runner 完成多人 5／5、其餘 14／14，19 項與直接 discovery 一致且各出現一次。Ubuntu CI 尚未驗證本次工作樹。
 
 ### M4.2 — Authoritative basic attack 與受傷
 
@@ -331,7 +334,10 @@ Windows 以 Node.js 24.22.3／pnpm 11.19.0 通過資產與地圖驗證、typeche
 - **Deliverables**：combat resolver、damage events、server validation errors。
 - **Acceptance criteria**：client 不能指定 damage／HP；每 swing 每 target 只一次、最多3 monsters；同 tick player lethal hit 取消 monster hit。
 - **Required tests**：range／facing／wall／cooldown boundaries、duplicate attack、critical seeded examples、multi-target ordering、i-frame／protection、malformed damage payload 拒絕。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **權威戰鬥驗收（2026-11-25）**。固定 tick 依序步進角色與怪物，結算合法普攻及怪物傷害。決定性測試通過 48 × 40 矩形與 reach 邊界、朝向鎖定、solid 遮擋、時序與 cooldown、重複輸入／swing ID、三目標排序、seeded 暴擊、物防／魔防、最低傷害與 overkill、Hurt／保護／Village、同 tick 致死、Return encounter 重置與精確重播。房間測試確認偽造欄位整幀拒絕、grace body 可受傷、到期移除及致死後 90 ticks 開始返村交接。 [戰鬥測試](../packages/simulation/test/combat.test.mjs) · [輸入測試](../apps/server/test/map-runtime.test.mjs) · [交接測試](../apps/server/test/world-travel.test.mjs)
+- **Chromium 驗收**。兩個獨立瀏覽器收到同一 Slime HP 71 → 51；送達伺服器的偽造傷害封包維持兩端 HP 71。隔離 fixture 在 tick 邊界只調整角色位置，正常的 Slime AI 使該角色 HP 50 → 43，旁觀者保持 50 HP。單 canvas、sprite 數量、執行期錯誤、預測校正、150 ms RTT 設定下的傳送／重連及原有 M4.1 回歸通過。 [瀏覽器測試](../tests/smoke/multiplayer.spec.mjs)
+- **本機檢查**。Windows、Node.js 24.22.3／pnpm 11.19.0。資產、七圖、typecheck、lint、格式、套件邊界、419 項 Vitest、正式建置及 Chromium 159.0.8154.6 smoke 通過。隔離多人 6／6、其餘 14／14，合併 discovery 與直接 discovery 相符，20 項各出現一次。本次工作樹的 Ubuntu CI 尚未執行。
 
 ### M4.3 — Contribution ledger 與單次 death claim
 
@@ -342,7 +348,10 @@ Windows 以 Node.js 24.22.3／pnpm 11.19.0 通過資產與地圖驗證、typeche
 - **Deliverables**：contribution ledger、deathId／attackId 去重、reward port 與 memory receipt skeleton。
 - **Acceptance criteria**：overkill 不多算、同 monster 只一 death intent；return 清 ledger；async callback 不再次 claim。
 - **Required tests**：兩個 simultaneous lethal hits、40+40 對60HP、duplicate event、stale generation、D=0 removal／return 不發獎勵、event permutation replay。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **決定性驗收（2026-11-25）**。40＋40 對 60 HP 記為 40＋20，尾刀先入帳，同 tick 只建立一份 death intent 並取消已死亡怪物的攻擊。測試涵蓋重複與過期事件、指令排列重播、Return 清帳與新 encounter ID、無傷害移除、群組歸屬與資格邊界、掉線／重連／交接，以及提交失敗、確認遺失與房間銷毀後完成結算。 [戰鬥測試](../packages/simulation/test/combat.test.mjs) · [帳本測試](../packages/simulation/test/encounter-rewards.test.mjs) · [receipt 測試](../apps/server/test/encounter-reward-worker.test.mjs) · [交接測試](../apps/server/test/world-travel.test.mjs)
+- **本機驗收**。Windows、Node.js 24.22.3、pnpm 11.19.0。資產、七張地圖、typecheck、lint、格式、套件邊界、435 項 Vitest、正式建置與 Chromium 159.0.8154.6 smoke 全數通過。兩位瀏覽器玩家共同削減 71 HP，兩端移除同一 sprite，伺服器 fixture 確認唯一 claim 與 receipt。多人 7／7、其餘 14／14，分階段和直接 discovery 的 21 項各出現一次。 [瀏覽器測試](../tests/smoke/multiplayer.spec.mjs)
+- **Ubuntu CI**。遠端基線 `2f737ae` 的 Ubuntu verify 已通過。M4.3 留在本機工作樹，尚未執行 Ubuntu CI。 [基線 CI](https://github.com/Jacky-stc/Viesma/actions/runs/45460525502/job/138681525944)
 
 ### M4.4 — Combat feedback、monster respawn 與玩家返村
 
@@ -353,7 +362,10 @@ Windows 以 Node.js 24.22.3／pnpm 11.19.0 通過資產與地圖驗證、typeche
 - **Deliverables**：combat view adapter、完整 monster lifecycle、death／respawn HUD。
 - **Acceptance criteria**：兩 client HP／死亡／新 monster generation 一致；RewardPending 不可再命中；玩家只 respawn 一次。
 - **Required tests**：visual event 去重、掉線後 full state、不重播舊 damage、respawn ID／timer、pending reward failure、player death／portal conflict。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+- **決定性驗收（2026-11-25）**。舊死亡 ID、舊世代、重複 receipt、提交失敗與確認遺失的重試都維持單一死亡認領。測試覆蓋 receipt 邊界、屍體 30 ticks、重生等待 300 ticks、新世代身分、出生上限、同 seed 重播、斷線快照與傷害去重。玩家測試覆蓋 portal 票券撤銷、單次返村、HP／MP 補滿、90 tick 保護與 Village 安全。 [權威戰鬥](../packages/simulation/test/combat.test.mjs) · [返村與故障注入](../apps/server/test/world-travel.test.mjs) · [傷害呈現](../apps/client/test/combat-presentation.test.mjs)
+- **本機驗收**。Windows、Node.js 24.22.3、pnpm 11.19.0、Chromium 159.0.8154.6。資產、七張地圖、typecheck、lint、格式、套件邊界、443 項 Vitest、正式建置與 21 項 smoke 皆通過。隔離多人階段 7／7，其餘 14／14。分階段與直接 discovery 的 21 項各出現一次。雙瀏覽器驗證共享 HP、RewardPending、receipt 後屍體、新世代、重連全量狀態、重複封包去重及單次返村。測試時鐘透過固定 tick driver 推進等待段。 [瀏覽器測試](../tests/smoke/multiplayer.spec.mjs) · [生命週期與同步契約](ARCHITECTURE.md#7-shared-monster-與-reward-pipeline)
+- **Ubuntu CI**。遠端基線 `2f737ae` 的 Ubuntu verify 通過。M4.4 變更留在本機工作樹，尚無 Ubuntu CI 執行紀錄。 [基線 CI](https://github.com/Jacky-stc/Viesma/actions/runs/45460525502/job/138681525944)
 
 ### M4.5 — Shared combat gate
 
@@ -364,7 +376,32 @@ Windows 以 Node.js 24.22.3／pnpm 11.19.0 通過資產與地圖驗證、typeche
 - **Deliverables**：combat integration report、replay seeds 與現存風險。
 - **Acceptance criteria**：多名玩家共同削減同一 HP，monster／玩家 death 可重複循環；無 private monster 或 client damage authority。
 - **Required tests**：至少4 actors 同時攻擊／死亡／重連、spawn cap、leash／reset、10分鐘 loop smoke、late join 看到正確 HP。
-- **Status**：NOT_STARTED
+- **Status**：DONE
+
+#### M4.5 驗收矩陣
+
+| 驗收項目 | 驗證 |
+| --- | --- |
+| 至少四名並行角色 | 四個獨立角色與連線共用房間。在相同 tick 送出普攻。實時循環逐次 wake 檢查兩房合計四具唯一角色 body。 [權威整合](../apps/server/test/shared-combat.test.mjs) · [循環斷言](../apps/server/test/shared-combat-loop.mjs) |
+| 同一份權威怪物 HP | 第一擊 71 → 51，同 tick 合法傷害 20、20、11，HP 歸零。兩個 Chromium 接收同一代 HP 並呈現對應傷害數字。 [權威整合](../apps/server/test/shared-combat.test.mjs) · [瀏覽器](../tests/smoke/multiplayer.spec.mjs) |
+| 同時攻擊與致死 | 反序送四份合法輸入，依角色 ID 結算，末擊封頂。每代唯一 claim、intent 與 memory receipt，另注入提交失敗與確認遺失。 [權威整合](../apps/server/test/shared-combat.test.mjs) · [故障與重試](../apps/server/test/world-travel.test.mjs) |
+| 角色死亡／重連／重生 | grace body 可受傷、30 秒邊界移除、舊連線及 epoch 拒絕。死亡滿 90 ticks 開始單次 Village 交接，HP／MP 補滿與 90 ticks 保護。 [故障與交接](../apps/server/test/world-travel.test.mjs) · [權威整合](../apps/server/test/shared-combat.test.mjs) |
+| Slime、Mushroom、Bat | 原始 M1 驗證 Slime 與 Mushroom。經驗證 M2 地圖直接作為 runtime fixture，三種怪維持界內移動與穩定 snapshot。純 AI fixture 驗證 Bat 飛行、薄牆、滑行與不可達目標。 [M1 runtime](../apps/server/test/map-runtime.test.mjs) · [M2 fixture](../apps/server/test/shared-combat.test.mjs) · [AI](../packages/simulation/test/monster-ai.test.mjs) |
+| 出生數量上限 | 將 runtime cap 設為 3 驗證穩定裁切；M1 實時循環檢查 10 個出生點維持在地圖 cap 12 內。 [runtime](../apps/server/test/map-runtime.test.mjs) · [循環斷言](../apps/server/test/shared-combat-loop.mjs) |
+| Leash、Return 與 encounter reset | 驗證 leash、失去目標、Return 免傷、重返出生點補血並更換 encounter，舊 hit 不得帶入。實時循環中受傷 Slime 在角色死亡後補滿 HP。 [AI](../packages/simulation/test/monster-ai.test.mjs) · [帳本](../packages/simulation/test/encounter-rewards.test.mjs) · [循環斷言](../apps/server/test/shared-combat-loop.mjs) |
+| 怪物反覆死亡與重生 | RewardPending 拒絕戰鬥。接受 receipt 後屍體 30 ticks、重生等待 300 ticks；新 monster ID、generation、encounter ID，拒絕舊世代事件。 [權威整合](../apps/server/test/shared-combat.test.mjs) · [戰鬥模擬](../packages/simulation/test/combat.test.mjs) |
+| 十分鐘實時循環 | `pnpm run build` 後執行 `pnpm run test:acceptance:m4.5`。以 monotonic clock 執行連續 600 秒，週期內包含正常普攻、目標追擊與 Return、兩側死亡與重生、入房／離房／重連與 receipt。 [實時命令](../apps/server/test/run-shared-combat-endurance.mjs) |
+| Late join 取得當下 HP | 先造成 20 點合法傷害，再加入新瀏覽器，取得同房同 ID 的 HP 51 且無舊傷害。重連取得 RewardPending 全量狀態，接續新 generation。 [瀏覽器](../tests/smoke/multiplayer.spec.mjs) |
+| 無私有怪物模擬 | 同房兩瀏覽器顯示共用 projection；不同 instance 的怪物 ID、HP 彼此獨立。重連、傳送與 late join 不增加出生數。 [房間傳輸](../apps/server/test/map-room.test.mjs) · [循環斷言](../apps/server/test/shared-combat-loop.mjs) |
+| 無 client damage／HP authority | 送達伺服器的偽造封包不改 HP。runtime 拒絕偽造傷害、HP、reward 欄位與過期 epoch，checkpoint 依連線所有權送達本人。 [瀏覽器](../tests/smoke/multiplayer.spec.mjs) · [輸入驗證](../apps/server/test/map-runtime.test.mjs) · [房間傳輸](../apps/server/test/map-room.test.mjs) |
+
+- **重播條件**。房間沿用 production seed `1`。四人重播使用固定 tick 與遞增 `scenario-0001…` ID，實時命令與兩輪演練使用相同場景及 `loop-000001…` ID。M2 以同 seed 反序載入 spawn definitions，比對 180 個權威快照。純 AI fixture 另外使用 seed `1000` 驗證 Bat 初始朝向受注入 RNG 控制。
+- **測試場景**。四人 fixture 將 M1 入口移到第一隻 Slime 附近、縮小該怪的巡邏範圍，並將 Village 的回程門移到重生點。攻擊、移動、入房與傳送都走正式 runtime API。 [場景配置](../apps/server/test/shared-combat-fixture.mjs)
+- **已修正缺陷**。Village 住滿 20 位時，死亡回復會因沒有可用房間而反覆失敗。現在同批死亡回復共用新 Village 建立作業，每個角色各保留一個目的席位與一次交接。一般 portal 維持滿房拒絕。 [回歸測試](../apps/server/test/world-travel.test.mjs)
+- **十分鐘實測（2026-11-25）**。Windows 11 26200、i7-1355U（12 logical CPUs）、16 GiB、Node.js 24.22.3／pnpm 11.19.0。實際 600.043 秒、18,000 ticks，兩房共四具角色 body。M1 10／12 怪物，Village 0。570 秒後停止開始新輪次，固定時鐘繼續到 600 秒。26 次循環各有角色死亡／返村、怪物死亡／重生、Return reset、receipt 提交與釋放。共 30 次 fresh join、26 次主動離房、26 次重連、208 次角色受傷、129 次怪物受傷。巡邏投影有 797 次位置變動，觀察到 11 ticks 的追擊位移。待處理意圖和保留 receipt 峰值各 1，結束各 0。最近傷害事件峰值 4／128，待 ACK 輸入峰值 1／6，單次 wake 最多步進 3／5。共補跑 4,789 ticks，積欠 episode 及殘留 backlog 均為 0。排程器在房間清理後停止，程序錯誤 0。
+- **本機驗收**。資產、七張地圖、typecheck、lint、格式、套件邊界、447 項 Vitest、正式建置及 Chromium 159.0.8154.6 smoke 通過。隔離多人 7／7，其餘 14／14。分階段與直接 discovery 各列出相同 21 項，每項一次。雙瀏覽器驗證中途入房 HP、兩端有效傷害數字、RewardPending 重連、舊事件清理、新怪物世代及單一 canvas。預設伺服器埠已有服務，瀏覽器測試以 `VIESMA_SERVER_PORT=25767` 執行。
+- **Ubuntu CI**。現有紀錄為遠端基線 `2f737ae` 的 Ubuntu verify 通過。M4.5 留在本機工作樹，尚無 Ubuntu CI 執行紀錄。 [基線 CI](https://github.com/Jacky-stc/Viesma/actions/runs/45460525502/job/138681525944)
+- **延後驗證**。M5.1／M5.5 負責實際成長與 memory reward mutation，M6.4 驗證私人獎勵 payload，M7 驗證 PostgreSQL durability。M8.2 驗證實機與冷載入預算，Vite 主 chunk 的 500 kB 門檻警告保留至該階段。M8.3 驗證多房容量與高負載時的 tick／queue 表現。M4.5 的實時命令使用 M1 與 Village runtime peer，瀏覽器測試另行驗證實際傳輸及渲染。
 
 ## 7. M5 — Progression, Loot & Inventory（5 tasks）
 

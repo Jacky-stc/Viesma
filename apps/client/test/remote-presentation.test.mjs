@@ -14,7 +14,17 @@ const runner = (x, fields = {}) => ({
   maxHp: 50,
   ...fields,
 })
-const slime = (x, hp = 71) => ({ monsterId: 'slime-1', archetypeId: 'slime', x, y: 896, state: 'patrol', facing: 'right', hp, maxHp: 71 })
+const slime = (x, hp = 71) => ({
+  monsterId: 'slime-1',
+  generation: 1,
+  archetypeId: 'slime',
+  x,
+  y: 896,
+  state: 'patrol',
+  facing: 'right',
+  hp,
+  maxHp: 71,
+})
 const peerAt = (view, milliseconds) => view.sample(milliseconds).peers.get('peer')
 
 test('interpolates presentation in server ticks without changing the authoritative samples', () => {
@@ -103,4 +113,21 @@ test('bounds history and clears removed or rejoining entities and disposed rooms
   view.clear()
   expect(view.sample(5000)).toEqual({ peers: new Map(), monsters: new Map() })
   expect(view.diagnostics()).toEqual({ clockSamples: 0, players: [], monsters: [] })
+})
+
+test('takes corpse and respawn from snapshots without blending across generations or replaying a stale transition', () => {
+  const view = createRemotePresentation()
+  const pending = { ...slime(470, 0), state: 'rewardPending' }
+  const corpse = { ...pending, state: 'dead' }
+  const respawn = { ...slime(465), monsterId: 'slime-2', generation: 2, state: 'spawning' }
+  view.receive(source, 10, 1000, [], [pending])
+  expect(view.sample(1000).monsters.get('slime-1').state).toBe('rewardPending')
+  view.receive(source, 13, 1100, [], [corpse])
+  expect(view.sample(1100).monsters.get('slime-1').state).toBe('dead')
+  expect(view.receive(source, 13, 1101, [], [pending])).toBe(false)
+  view.receive(source, 43, 2100, [], [{ ...corpse, state: 'respawnWait' }])
+  expect(view.sample(2100).monsters.get('slime-1').state).toBe('respawnWait')
+  view.receive(source, 343, 12100, [], [respawn])
+  expect(view.receive(source, 342, 12101, [], [corpse])).toBe(false)
+  expect([...view.sample(12101).monsters.entries()]).toEqual([['slime-2', expect.objectContaining({ state: 'spawning' })]])
 })

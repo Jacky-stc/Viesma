@@ -91,3 +91,18 @@ export function overlaps(min: number, max: number, otherMin: number, otherMax: n
 export function crossesFace(start: number, target: number, face: number, positive: boolean): boolean {
   return positive ? start <= face && face <= target : target <= face && face <= start
 }
+
+function axisInterval(start: number, end: number, min: number, max: number): readonly [number, number] | undefined {
+  const distance = end - start
+  if (distance === 0) return start > min && start < max ? [-Infinity, Infinity] : undefined
+  const enter = (min - start) / distance
+  const exit = (max - start) / distance
+  return [Math.min(enter, exit), Math.max(enter, exit)]
+}
+
+/** 檢查直線是否穿入 AABB 內部，沿邊或只碰到角點不相交。 */
+export function segmentIntersectsInterior(from: WorldPoint, to: WorldPoint, { left, top, right, bottom }: Edges): boolean {
+  const horizontal = axisInterval(from.x, to.x, left, right)
+  const vertical = axisInterval(from.y, to.y, top, bottom)
+  return Boolean(horizontal && vertical && Math.max(0, horizontal[0], vertical[0]) < Math.min(1, horizontal[1], vertical[1]))
+}

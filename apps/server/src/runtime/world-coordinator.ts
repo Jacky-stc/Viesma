@@ -1,5 +1,5 @@
 import { isNonNegativeSafeInteger, toSimulationTick, type CharacterId, type MapInstanceId, type SimulationTick } from '@viesma/domain'
-import { monsterMaxHpAtLevel, type GameData, type NormalizedMap } from '@viesma/game-data'
+import { getBeginnerCombatStats, type GameData, type NormalizedMap } from '@viesma/game-data'
 import {
   parsePortalRequest,
   type MapRoomSession,
@@ -17,8 +17,11 @@ import {
   respawnPlayer,
   ticksPerSecond,
   type MonotonicClock,
+  type PartyMembership,
 } from '@viesma/simulation'
+import { createEncounterRewardWorker, type EncounterRewardPort } from './encounter-reward-worker.ts'
 import { createMapRuntime, type MapRuntime } from './map-runtime.ts'
+import { getMonsterSpawnDefinitions } from './monster-spawns.ts'
 
 interface WorldDependencies {
   readonly clock: MonotonicClock
@@ -27,6 +30,8 @@ interface WorldDependencies {
   readonly onBacklog: (backlogTicks: number) => void
   readonly onBacklogRecovered?: (recoveryMilliseconds: number, catchUpTicks: number) => void
   readonly createDestination?: (mapId: OnlineMapId) => Promise<unknown>
+  readonly partyMembership?: (characterId: CharacterId) => PartyMembership | undefined
+  readonly rewardPort?: EncounterRewardPort
 }
 
 export interface RoomPeer {
@@ -52,8 +57,9 @@ interface CharacterRoute {
 
 type Spawn = NormalizedMap['spawns'][number]
 type Creation = { status: 'pending' | 'failed' | 'created' }
-interface Transfer {
-  readonly requestId: number | null
+type TransferCause =
+  { readonly requestId: number; readonly diedAtTick?: never } | { readonly requestId: null; readonly diedAtTick: SimulationTick }
+type Transfer = TransferCause & {
   readonly mapId: OnlineMapId
   readonly spawn: Spawn
   readonly mapEpoch: number
@@ -94,16 +100,20 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     throw new RangeError('M3.4 requires the M1 and Village maps and their development spawns')
   const maps = { m1, village }
   const spawns = { m1: m1Spawn, village: villageSpawn }
-  const monsterSpawn = m1.monsterSpawns.find(({ id }) => id === 'spawn_slime_1')
-  const archetype = data.monsters.find(({ id }) => id === monsterSpawn?.monsterArchetypeId)
-  if (monsterSpawn?.movement !== 'ground' || !archetype) throw new RangeError('M1 requires a ground monster fixture at spawn_slime_1')
-  const fixture = {
-    spawn: monsterSpawn,
-    patrolSpeed: archetype.patrolSpeed,
-    maxHp: Number(monsterMaxHpAtLevel(archetype, monsterSpawn.level, data.monsterScaling)),
+  const playerStats = getBeginnerCombatStats(data)
+  const monsterSpawns = {
+    m1: { definitions: getMonsterSpawnDefinitions(data, m1), maxActive: data.world.maxMonstersPerMap },
+    village: { definitions: getMonsterSpawnDefinitions(data, village), maxActive: data.world.maxMonstersPerMap },
   }
 
   const { clock, schedule, nextId, onBacklog, createDestination } = dependencies
+  const rewards = createEncounterRewardWorker(dependencies.rewardPort)
+  const combat = {
+    playerStats,
+    balanceVersion: data.balanceVersion,
+    rewards,
+    ...(dependencies.partyMembership && { partyMembership: dependencies.partyMembership }),
+  }
   const bootId = nextId()
   const rooms = new Map<MapInstanceId, MapRuntime>()
   const routes = new Map<CharacterId, CharacterRoute>()
@@ -167,7 +177,9 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     const matching = [...rooms.values()].filter(({ map }) => map.id === transfer.mapId)
     const destination = matching.find((room) => room.hasCapacity())
     if (!destination) {
-      if (matching.length) return failTransfer(route, 'MAP_SEAT_UNAVAILABLE', now)
+      if (matching.length && (transfer.requestId !== null || transfer.creation)) {
+        return failTransfer(route, 'MAP_SEAT_UNAVAILABLE', now)
+      }
       if (transfer.creation) return failTransfer(route, 'TRANSFER_FAILED', now)
       transfer.creation = createMissingRoom(transfer.mapId)
       return
@@ -203,7 +215,9 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     let arrive
     try {
       const body = source.player(route.characterId)
-      if (!body) return failTransfer(route, 'TRANSFER_FAILED', now)
+      if (!body || (body.action.kind === 'death' ? body.action.diedAtTick : undefined) !== transfer.diedAtTick) {
+        return failTransfer(route, 'TRANSFER_FAILED', now)
+      }
       const arrival =
         transfer.requestId === null
           ? respawnPlayer(body, frameTick, source.mapInstanceId, { ...spawn, mapId: destination.map.id, spawnId: spawn.id })?.player
@@ -240,7 +254,11 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
       if (route.reconnectUntil !== undefined && now >= route.reconnectUntil) removeRoute(route)
       return
     }
-    if (transfer) {
+    const body = room.player(characterId)
+    if (transfer && transfer.requestId !== null && body?.action.kind === 'death') {
+      failTransfer(route, 'PORTAL_UNAVAILABLE', now)
+      route.nextRespawnMilliseconds = now
+    } else if (transfer) {
       if (now >= transfer.expiresAt) failTransfer(route, 'TRANSFER_EXPIRED', now)
       else if (transfer.canceled || (transfer.destination && !registered(transfer.destination))) failTransfer(route, 'TRANSFER_FAILED', now)
       else if (canAdmit()) {
@@ -250,15 +268,20 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
       return
     }
 
-    const request = route.portal
+    let request = route.portal
     route.portal = undefined
-    const body = room.player(characterId)
     if (!body) {
       if (request) reportFailure(peer, { requestId: request.requestId, code: 'PORTAL_UNAVAILABLE' })
       return
     }
+    const diedAtTick = body.action.kind === 'death' ? body.action.diedAtTick : undefined
+    if (request && diedAtTick !== undefined) {
+      reportFailure(peer, { requestId: request.requestId, code: 'PORTAL_UNAVAILABLE' })
+      request = undefined
+    }
     let mapId: OnlineMapId
     let spawn: Spawn | undefined
+    let cause: TransferCause
     if (request) {
       const portal = canUseGroundedInteraction(body) && findOverlappingPortal(room.map, body.position)
       const target = portal && portal.destinationMapId
@@ -267,8 +290,9 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
       }
       mapId = target === 'm1' ? 'm1' : 'village'
       spawn = maps[mapId].spawns.find(({ id }) => id === portal.destinationSpawnId)
+      cause = { requestId: request.requestId }
     } else {
-      if (body.action.kind !== 'death' || now < route.nextRespawnMilliseconds) return
+      if (diedAtTick === undefined || now < route.nextRespawnMilliseconds) return
       const respawn = respawnPlayer(body, frameTick, room.mapInstanceId, {
         ...spawns.village,
         mapId: maps.village.id,
@@ -278,9 +302,10 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
       if (room.map.id === 'village') return room.respawn(peer.connection, respawn.player)
       mapId = 'village'
       spawn = spawns.village
+      cause = { requestId: null, diedAtTick }
     }
 
-    const requestId = request?.requestId ?? null
+    const { requestId } = cause
     if (!canAdmit()) {
       route.nextRespawnMilliseconds = now + respawnRetryMilliseconds
       return reportFailure(peer, { requestId, code: 'WORLD_TICK_BACKLOG' })
@@ -288,8 +313,16 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     const mapEpoch = (room.binding(peer.connection)?.mapEpoch ?? Number.MAX_SAFE_INTEGER) + 1
     if (!spawn || !isNonNegativeSafeInteger(mapEpoch)) return reportFailure(peer, { requestId, code: 'TRANSFER_FAILED' })
     room.freeze(peer.connection)
-    route.transfer = { requestId, mapId, spawn, mapEpoch, expiresAt: now + transferMilliseconds }
+    route.transfer = { ...cause, mapId, spawn, mapEpoch, expiresAt: now + transferMilliseconds }
     prepareTransfer(route, route.transfer, now)
+  }
+
+  function stopIfIdle(): void {
+    if (rooms.size > 0 || rewards.hasPending()) return
+    stop?.()
+    stop = undefined
+    backlogTicks = 0
+    backlogStartedAt = undefined
   }
 
   function start(): void {
@@ -299,6 +332,7 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     const driver = createFixedTickDriver(
       { nowMilliseconds: () => wakeMilliseconds },
       (frame) => {
+        rewards.advance()
         for (const route of routes.values()) advanceRoute(route, frame.tick, wakeMilliseconds)
         for (const id of [...rooms.keys()].sort()) rooms.get(id)?.advance(frame, wakeMilliseconds)
         tick = frame.tick
@@ -320,6 +354,7 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
         backlogStartedAt = undefined
         dependencies.onBacklogRecovered?.(lastBacklogRecoveryMilliseconds, catchUpTicks)
       }
+      stopIfIdle()
     }, 1000 / ticksPerSecond)
   }
 
@@ -404,11 +439,14 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     acceptTransfer(room: MapRuntime, peer: RoomPeer, ticket: string, reconnectToken: string): boolean {
       const route = tickets.get(ticket)
       const transfer = route?.transfer
+      const action = route?.room.player(route.characterId)?.action
       if (
         !canAdmit() ||
         !route ||
         route.reconnectToken !== reconnectToken ||
         !transfer ||
+        !action ||
+        (action.kind === 'death' ? action.diedAtTick : undefined) !== transfer.diedAtTick ||
         transfer.ticket !== ticket ||
         transfer.destination !== room ||
         !registered(room) ||
@@ -496,8 +534,9 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
         mapContentHash,
         tick,
         nextId,
-        mapId === 'm1' ? fixture : undefined,
-        roomId
+        monsterSpawns[mapId],
+        roomId,
+        combat
       )
       rooms.set(mapInstanceId, room)
       if (!stop) start()
@@ -511,12 +550,7 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
         else if (route.transfer?.destination === room) route.transfer.canceled = true
       }
       room.dispose()
-      if (rooms.size === 0) {
-        stop?.()
-        stop = undefined
-        backlogTicks = 0
-        backlogStartedAt = undefined
-      }
+      stopIfIdle()
     },
   }
 }

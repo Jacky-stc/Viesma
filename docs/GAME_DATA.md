@@ -7,7 +7,7 @@
 | `schemaVersion` | 初始為 `1`。文件形狀或欄位語意有不相容變更時提高版本。載入器只接受目前版本，舊資料須明確更新。 |
 | `balanceVersion` | 初始為 `mvp-1`，是整份內容的穩定版本標籤。變更已發布的資料或平衡時更新標籤，部署時整份換版。 |
 | `mapContentHash` | 以 UTF-8 編碼的 canonical manifest JSON 計算 SHA-256，表示為 64 碼小寫十六進位字串。包含 tile size、respawn、地圖基本資料、spawn ID、portal、怪物配置摘要及已匯入的正規化地圖。有匯入內容時加入 `tiledMaps` 欄位，空集合沿用 M0.4 的序列化。 |
-| `protocolVersion` | 由 `@viesma/protocol` 定義。M3.2 的本人 movement checkpoint 使用 `2`，M3.3 的公開怪物投影與角色世代欄位使用 `3`。Wire contract 有不相容變更時提高版本。 |
+| `protocolVersion` | 由 `@viesma/protocol` 定義。M3.4 的地圖交接與重連使用 `4`，M4.2 沿用。Wire contract 有不相容變更時提高版本。 |
 
 Server 和 client 共同使用 `loadGrayboxGameData` 載入隨程式發布的七張 Tiled JSON。Server 以 `serializeMapManifest` 計算入房版本的 hash。M3.1 接入 transport admission，`checkJoinVersion` 對 protocol、balance、map hash 依序精確比對。版本以部署為單位更新。
 
@@ -20,6 +20,9 @@ Server 和 client 共同使用 `loadGrayboxGameData` 載入隨程式發布的七
 - `loadGrayboxGameData` 也驗證 Guide 設定的穩定 ID、正整數互動半徑和非空白對話，並將其連結到 Village 的正規化 `npc_guide` 點。缺少該點時，發行資料驗證失敗。初始 96 world units 沿用 `mvp-1` 的設計基線。點位隨正規化地圖納入 `mapContentHash`，對話文字與距離設定隨 build 發布。 [Guide 設定](../packages/game-data/src/guide.ts)
 - `progression` 包含等級上限、每級 AP、EXP 係數與按目前等級排列的表。載入器核對 `coefficient × L × (L + 1)`，並算出到頂累計 EXP 及 AP。Fixture 用同一份係數與等級上限產生表。
 - `monsters` 包含 Slime、Mushroom、Bat 的 Lv1 初值、移動與傷害類型、掉落表和素材。等級縮放以整數基點表示，載入時檢查最高等級的計算結果及 EXP 分配乘積的安全上限。
+- `initialMonsterAiBalance` 啟用 GAME_DESIGN 的 `mvp-1` 目標掃描、aggro／lose-target／leash、失去目標與攻擊時序，以及 M4.4 的 corpse 30 ticks、respawn wait 300 ticks。 `loadMonsterAiBalance` 驗證數值範圍、半徑順序及 cooldown 長度。Spawn director 使用已驗證的 archetype、等級、巡邏區間或飛行區域，按 spawn ID 選取最多 `world.maxMonstersPerMap` 個出生點。
+- `initialPlayerAttackBalance` 集中 M4.2 普攻時序、48 × 40 命中矩形、目標上限、怪物戰鬥中心與暴擊倍率。`getBeginnerCombatStats` 從已驗證的 Training Sword 與 Beginner 初始屬性計算普攻、物防、魔防及暴擊基點。怪物 HP、ATK、DEF 使用同一套載入驗證與出生等級縮放公式。 [戰鬥規則](GAME_DESIGN.md#4-combat)
+- `initialEncounterRewardBalance` 集中 M4.3 使用的既定 `mvp-1` 門檻。累計傷害至少 100 基點（1%，向上取整且至少 1），最近傷害在 450 ticks 內，角色戰鬥中心距怪物死亡中心至多 640 world units。 [合格條件](GAME_DESIGN.md#63-death-time-eligibility)
 - `items` 區分消耗品、素材、裝備。裝備槽的資料 ID 為 `weapon`、`armor`、`accessory`。`equipmentTiers` 提供各層級的三槽測試定義。`lootTables` 描述各自獨立的掉落項目，機率單位為基點，`10000` 代表 100%。固定物品與素材的數量區間最多一疊，裝備 tier 指向三個同級、槽位相符的物品。
 
 內容 ID 用穩定的小寫 ASCII 字串，各類別使用不同型別。Portal 與 spawn ID 各自在地圖內唯一，loot entry ID 在表內唯一。Runtime 的 `monsterId`、`lootId`、`mapInstanceId` 以及 `characterId`、`itemInstanceId` 等持久識別由各自的 owner 配發。
@@ -32,4 +35,4 @@ Server 和 client 共同使用 `loadGrayboxGameData` 載入隨程式發布的七
 2. 執行 `pnpm run test`。驗證失敗時依 `GameDataValidationError` 的 `code`、`path` 和訊息修正資料，例如 `world.maps[1].portals[0].destinationSpawnId` 指向未知 spawn。整份文件通過後，載入器才回傳獨立且遞迴凍結的資料。
 3. 執行 `pnpm run build` 和 `pnpm run test:smoke`。本機執行 `pnpm dev` 會先建置 server 所用的資料和 protocol 套件，編輯資料後重新啟動 dev 入口。
 
-Canonical manifest 由 loader 按 bytewise ID 排序地圖、portal、spawn，怪物群組按 archetype ID 及等級排序。正規化 Tiled 地圖按 map ID、tileset path、各類物件 ID 排序。Tile Layers 維持繪製順序，cells 維持列優先順序。GID 正規化成 tileset path、local tile ID 和翻轉旗標。輸出固定欄位順序，重排 JSON 鍵、碰撞物件或等價的 GID 分配會得到相同 hash。碰撞盒、spawn、portal trigger、atlas 路徑及格線描述納入 hash。圖片位元組與動畫由 [client 資產管線](ASSETS.md) 獨立驗證。M3.3 使用現有 `mvp-1` 資料中的 M1 `spawn_slime_1` 與 Slime 定義。 [房間怪物契約](ARCHITECTURE.md#7-shared-monster-與-reward-pipeline)
+Canonical manifest 由 loader 按 bytewise ID 排序地圖、portal、spawn，怪物群組按 archetype ID 及等級排序。正規化 Tiled 地圖按 map ID、tileset path、各類物件 ID 排序。Tile Layers 維持繪製順序，cells 維持列優先順序。GID 正規化成 tileset path、local tile ID 和翻轉旗標。輸出固定欄位順序，重排 JSON 鍵、碰撞物件或等價的 GID 分配會得到相同 hash。碰撞盒、spawn、portal trigger、atlas 路徑及格線描述納入 hash。圖片位元組與動畫由 [client 資產管線](ASSETS.md) 獨立驗證。M4.1 使用既有 `mvp-1` 初始資料與 Tiled 匯出。 [房間怪物契約](ARCHITECTURE.md#7-shared-monster-與-reward-pipeline)

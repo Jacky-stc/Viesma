@@ -10,9 +10,9 @@ import {
 import { initialPhysicsBalance, type GameData, type GuideDefinition, type MapPortal, type NormalizedMap } from '@viesma/game-data'
 import { selectInputCommands, type LocalMapInputCommand, type NpcInteractionRequest } from './movement-input.js'
 import { createPlayerController } from './player-controller.js'
-import { respawnPlayer, type PlayerLifecycleEvent } from './player-lifecycle.js'
+import { respawnPlayer } from './player-lifecycle.js'
 import { createPlayer, placePlayerAtSpawn, type SimulationPlayer } from './player.js'
-import { stepWithSelectedInputs, type SimulationContext, type SimulationState } from './step.js'
+import { stepWithSelectedInputs, type SimulationContext, type SimulationEvent, type SimulationState } from './step.js'
 
 export interface LocalWorldState extends SimulationState {
   readonly mapEpoch: NonNegativeSafeInteger
@@ -44,7 +44,7 @@ export interface LocalPortalEvent {
   readonly spawnId: MapPortal['destinationSpawnId']
 }
 
-type LocalWorldEvent = PlayerLifecycleEvent | LocalPortalEvent | LocalGuideEvent
+type LocalWorldEvent = SimulationEvent | LocalPortalEvent | LocalGuideEvent
 
 interface LocalWorldStepResult {
   readonly state: LocalWorldState

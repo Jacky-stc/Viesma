@@ -150,7 +150,10 @@ export function createRemotePresentation() {
         sharedMonsters,
         tick,
         (monster) => monster.monsterId,
-        (before, after) => before.archetypeId === after.archetypeId
+        (before, after) =>
+          before.archetypeId === after.archetypeId &&
+          before.generation === after.generation &&
+          monsterLife(before.state) === monsterLife(after.state)
       )
       return true
     },
@@ -175,7 +178,7 @@ export function createRemotePresentation() {
         monsters: new Map(
           Array.from(monsters, ([id, track]) => {
             const { position, value, visualTick: tick } = sampleTrack(track, visualTick, 0)
-            return [id, { position, visualTick: tick, archetypeId: value.archetypeId, facing: value.facing }]
+            return [id, { position, visualTick: tick, archetypeId: value.archetypeId, facing: value.facing, state: value.state }]
           })
         ),
       }
@@ -187,4 +190,8 @@ export function createRemotePresentation() {
     }),
     clear,
   }
+}
+
+function monsterLife(state: PublicMonster['state']) {
+  return state === 'patrol' || state === 'attack' ? 'alive' : state
 }

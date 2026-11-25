@@ -1,8 +1,9 @@
-import { CloseCode, ErrorCode, getMessageBytes, matchMaker, Protocol, Room, ServerError, type Client } from '@colyseus/core'
+import { ClientState, CloseCode, ErrorCode, getMessageBytes, matchMaker, Protocol, Room, ServerError, type Client } from '@colyseus/core'
 import { MapRoomSchema, updateMapRoomSchema, type MapRoomState } from '@viesma/network-colyseus'
 import {
   cancelTransferMessage,
   checkJoinVersion,
+  combatDamageMessage,
   inputFrameMessage,
   interactPortalMessage,
   mapRoomJoinedMessage,
@@ -36,6 +37,7 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
     patchRate = 100
     seatReservationTimeout = reservationSeconds
     #runtime: MapRuntime | undefined
+    #combatReady = new WeakSet<Client>()
 
     onCreate(): void {
       const runtime = world.createRoom(mapId, this.roomId)
@@ -110,11 +112,19 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
       if (!runtime) return
       this.autoDispose = !runtime.hasRetainedSeats()
       const snapshot = runtime.snapshot()
-      if (snapshot.serverTick === this.state.serverTick) return
+      const previousTick = this.state.serverTick
+      if (snapshot.serverTick === previousTick) return
       updateMapRoomSchema(this.state, snapshot)
+      const combatDamage = runtime.combatDamageSince(previousTick)
       for (const client of this.clients) {
+        if (client.state !== ClientState.JOINED) continue
         const checkpoint = world.checkpoint(runtime, client)
-        if (checkpoint) client.send(movementCheckpointMessage, checkpoint, { afterNextPatch: true })
+        if (!checkpoint) continue
+        client.send(movementCheckpointMessage, checkpoint, { afterNextPatch: true })
+        if (combatDamage && this.#combatReady.has(client)) {
+          client.send(combatDamageMessage, combatDamage, { afterNextPatch: true })
+        }
+        this.#combatReady.add(client)
       }
     }
 

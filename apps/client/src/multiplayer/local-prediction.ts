@@ -36,7 +36,7 @@ export function createLocalPrediction(map: NormalizedMap, mapInstanceId: string,
 
   function advance(state: PredictedMovement, frame: HistoryFrame): PredictedMovement {
     const tick = toSimulationTick(state.tick + 1)
-    // Attack edge 隨原幀保留。M1 開發房只接通移動，控制器沒有預測戰鬥事件。
+    // Attack edge 隨原幀保留。攻擊狀態由 server checkpoint 提供。
     return { tick, controller: advanceController(state.controller, frame, undefined, tick) }
   }
 

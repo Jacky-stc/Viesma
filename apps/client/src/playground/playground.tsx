@@ -299,6 +299,8 @@ export function Playground() {
                 HP {multiplayer.hp} / {multiplayer.maxHp}
               </span>
               <span aria-label="同房角色數">同房 {multiplayer.players} 人</span>
+              {multiplayer.state === 'death' && <span role="status">已倒下，等待返回 Village</span>}
+              {multiplayer.spawnProtected && <span role="status">重生保護</span>}
             </>
           )}
           {actions.length > 0 && <span>輸入 · {actions.map((action) => actionLabels[action]).join('／')}</span>}

@@ -2,6 +2,7 @@ import { fixedDeltaSeconds, type SimulationTick } from '@viesma/domain'
 import { GameDataValidationError, initialPhysicsBalance, loadPlayerMovementBalance, type PlayerMovementBalance } from '@viesma/game-data'
 import { createPhysicsStepper, maxPhysicsSpeed, type PhysicsWorldDefinition } from '@viesma/physics'
 import type { PlayerInputCommand } from './movement-input.js'
+import { playerHurtAction } from './player-lifecycle.js'
 import type { FacingDirection, PlayerAction, PlayerActionEvent, PlayerControllerState, PlayerPhysicsState } from './player.js'
 
 const inputTimeoutTicks = 6
@@ -22,7 +23,7 @@ function resolveAction(
   tookDamage: boolean,
   hurtTicks: number
 ): PlayerAction {
-  if (tookDamage) return { kind: 'hurt', ticksRemaining: hurtTicks }
+  if (tookDamage) return playerHurtAction(hurtTicks)
   if (action.kind === 'hurt' && action.ticksRemaining > 1) return { kind: 'hurt', ticksRemaining: action.ticksRemaining - 1 }
   if (action.kind === 'attack' && !events?.has('attackEnded')) return action
   return events?.has('attackStarted') ? { kind: 'attack', facing } : { kind: 'none' }

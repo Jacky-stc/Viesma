@@ -1,24 +1,36 @@
-import type { CharacterId, MapInstanceId, MonsterId, SimulationTick } from '@viesma/domain'
-import type { NormalizedMap } from '@viesma/game-data'
-import { parseInputFrame, PROTOCOL_VERSION, type MapRoomJoin, type MovementCheckpoint, type PublicMapRoom } from '@viesma/protocol'
+import type { AttackId, CharacterId, EncounterId, MapInstanceId, MonsterId, SimulationTick } from '@viesma/domain'
+import type { NormalizedMap, PlayerCombatStats } from '@viesma/game-data'
 import {
-  createMonsterFixture,
+  maxCombatDamageAgeTicks,
+  maxCombatDamageEvents,
+  parseInputFrame,
+  PROTOCOL_VERSION,
+  type CombatDamage,
+  type CombatDamageBatch,
+  type MapRoomJoin,
+  type MovementCheckpoint,
+  type PublicMapRoom,
+} from '@viesma/protocol'
+import {
+  createMonsterMovement,
   createPlayer,
   createPlayerController,
   createSeededRng,
+  createSolidObstructionTest,
   getPlayerPresentationState,
   neutralMovement,
+  spawnMonsters,
   step,
-  stepMonsterFixture,
   ticksPerSecond,
+  type CombatDamageEvent,
   type FixedTick,
-  type MonsterFixture,
-  type MonsterFixtureDefinition,
-  type MonsterFixtureEvent,
+  type MonsterSpawnDefinition,
+  type PartyMembership,
   type PlayerInputCommand,
   type SimulationPlayer,
   type SimulationState,
 } from '@viesma/simulation'
+import type { EncounterRewardWorker } from './encounter-reward-worker.ts'
 
 export const mapRoomCapacity = 20
 const initialMapEpoch = 0
@@ -42,6 +54,7 @@ interface CharacterSeat extends MapRoomJoin {
   ackInputSeq: ParsedFrame['seq'] | null
   dead: boolean
   frozen: boolean
+  connected: boolean
   inputTokens: number
   lastRefillMilliseconds: number
 }
@@ -55,6 +68,7 @@ function createSeat(binding: MapRoomJoin & { characterId: CharacterId }, nowMill
     ackInputSeq: null,
     dead,
     frozen: false,
+    connected: true,
     inputTokens: inputBurst,
     lastRefillMilliseconds: nowMilliseconds,
   }
@@ -64,6 +78,13 @@ function expireQueuedInputs(pending: QueuedFrame[], nowMilliseconds: number): vo
   while (pending[0] && nowMilliseconds - pending[0].receivedMilliseconds > inputQueueTtlMilliseconds) pending.shift()
 }
 
+interface MapCombatOptions {
+  readonly playerStats: PlayerCombatStats
+  readonly balanceVersion: string
+  readonly rewards: EncounterRewardWorker
+  readonly partyMembership?: (characterId: CharacterId) => PartyMembership | undefined
+}
+
 export function createMapRuntime(
   mapInstanceId: MapInstanceId,
   map: NormalizedMap,
@@ -71,27 +92,95 @@ export function createMapRuntime(
   mapContentHash: string,
   initialTick: SimulationTick,
   nextId: () => string,
-  fixture?: MonsterFixtureDefinition,
-  roomId: string = mapInstanceId
+  monsterSpawns?: { readonly definitions: readonly MonsterSpawnDefinition[]; readonly maxActive: number },
+  roomId: string = mapInstanceId,
+  combatOptions?: MapCombatOptions
 ) {
   const controller = createPlayerController(map)
   const rng = createSeededRng(1)
-  const ids = {
-    nextAttackId() {
-      throw new Error('The M1 development room does not create attack entities')
+  const monsterIds = {
+    nextMonsterId: () => nextId() as MonsterId,
+    nextEncounterId: () => nextId() as EncounterId,
+  }
+  const rewards = combatOptions?.rewards
+  const monsterContext = {
+    move: createMonsterMovement(map.colliders),
+    ...monsterIds,
+    ...(rewards && { receiptFor: rewards.receipt }),
+  }
+  const ids = { nextAttackId: () => nextId() as AttackId }
+  let state: SimulationState = {
+    tick: initialTick,
+    map: {
+      mapId: map.id,
+      mapInstanceId,
+      players: [],
+      monsters: monsterSpawns ? spawnMonsters(monsterSpawns.definitions, monsterSpawns.maxActive, monsterIds, rng) : [],
+      attacks: [],
     },
   }
-  let state: SimulationState = { tick: initialTick, map: { mapId: map.id, mapInstanceId, players: [], monsters: [], attacks: [] } }
-  let monster: MonsterFixture | undefined = fixture && createMonsterFixture(nextId() as MonsterId, fixture)
-  const pendingFixtureEvents = new Set<MonsterFixtureEvent>()
-  const acceptedFixtureEvents = new Set<MonsterFixtureEvent>()
   const seats = new Map<CharacterId, CharacterSeat>()
   const bindings = new Map<object, CharacterSeat>()
   const reservations = new Set<CharacterId>()
+  const recentDamage: CombatDamage[] = []
+  let damageId = 0
   let disposed = false
+  const combat = combatOptions && {
+    playerStats: combatOptions.playerStats,
+    balanceVersion: combatOptions.balanceVersion,
+    isObstructed: createSolidObstructionTest(map.colliders),
+    participant(characterId: CharacterId) {
+      const seat = seats.get(characterId)
+      if (!seat) return undefined
+      const membership = combatOptions.partyMembership?.(characterId)
+      return { connected: seat.connected && !seat.frozen, ...(membership && { membership }) }
+    },
+  }
+
+  function releaseRemovedClaims(nextMonsters: SimulationState['map']['monsters']) {
+    if (!rewards || !state.map.monsters.some(({ behavior }) => 'deathId' in behavior)) return
+    const survivors = new Set(nextMonsters.map(({ monsterId }) => monsterId))
+    for (const { monsterId, behavior } of state.map.monsters) {
+      if ('deathId' in behavior && !survivors.has(monsterId)) rewards.releaseEncounter(behavior.deathId)
+    }
+  }
 
   function player(characterId: CharacterId) {
     return state.map.players.find((body) => body.characterId === characterId)
+  }
+
+  function recordDamage(event: CombatDamageEvent) {
+    const fields = { tick: event.tick, amount: event.effectiveDamage }
+    if (event.kind === 'monsterDamaged') {
+      const monster = state.map.monsters.find(
+        ({ monsterId, encounterId }) => monsterId === event.monsterId && encounterId === event.encounterId
+      )
+      if (!monster) return
+      recentDamage.push({
+        ...fields,
+        ...monster.position,
+        id: ++damageId,
+        kind: 'monster',
+        targetId: monster.monsterId,
+        generation: monster.generation,
+        critical: event.critical,
+      })
+    } else {
+      const seat = seats.get(event.characterId)
+      const body = player(event.characterId)
+      if (!body || !seat) return
+      recentDamage.push({
+        ...fields,
+        ...body.position,
+        id: ++damageId,
+        kind: 'player',
+        targetId: body.characterId,
+        lifeStartedTick: body.lifeStartedTick,
+        mapEpoch: seat.mapEpoch,
+        critical: false,
+      })
+    }
+    if (recentDamage.length > maxCombatDamageEvents) recentDamage.shift()
   }
 
   function putPlayer(body: SimulationPlayer) {
@@ -207,6 +296,7 @@ export function createMapRuntime(
       const seat = bindings.get(connection)
       if (!seat) return
       bindings.delete(connection)
+      seat.connected = false
       seat.frozen = false
       clearInput(seat)
     },
@@ -258,13 +348,6 @@ export function createMapRuntime(
       actor.pending.push({ frame, receivedMilliseconds: nowMilliseconds, conflict: false })
       return true
     },
-    /** 測試介面僅供伺服器呼叫，於下一個 tick 套用。 */
-    queueMonsterFixtureEvent(event: MonsterFixtureEvent): boolean {
-      if (!monster || acceptedFixtureEvents.has(event)) return false
-      acceptedFixtureEvents.add(event)
-      pendingFixtureEvents.add(event)
-      return true
-    },
     advance({ tick, dtSeconds }: FixedTick, nowMilliseconds: number): void {
       if (disposed) return
       const currentPlayers = new Map(state.map.players.map((player) => [player.characterId, player]))
@@ -290,6 +373,7 @@ export function createMapRuntime(
             seq: pending.frame.seq,
             moveX: pending.frame.moveX,
             jumpPressed: pending.frame.jumpPressed,
+            attackPressed: pending.frame.attackPressed,
           })
       }
       const result = step({ ...state, map: { ...state.map, players } }, commands, dtSeconds, {
@@ -297,18 +381,23 @@ export function createMapRuntime(
         rng,
         ids,
         playerController: controller,
+        monsters: monsterContext,
+        ...(combat && { combat: { ...combat, admitAttacks: rewards?.canAdmitAttacks() ?? true } }),
       })
+      releaseRemovedClaims(result.state.map.monsters)
       state =
         frozen.length === 0
           ? result.state
           : { ...result.state, map: { ...result.state.map, players: [...result.state.map.players, ...frozen] } }
-      if (monster) monster = stepMonsterFixture(monster, pendingFixtureEvents)
-      pendingFixtureEvents.clear()
-      const deaths = result.events.length
-        ? new Set(result.events.filter(({ kind }) => kind === 'playerDied').map(({ characterId }) => characterId))
-        : undefined
+      const deaths = new Set<CharacterId>()
+      for (const event of result.events) {
+        if (event.kind === 'playerDied') deaths.add(event.characterId)
+        if (event.kind === 'monsterDeathClaimed') rewards?.accept(event.intent)
+        if (event.kind === 'monsterDamaged' || event.kind === 'playerDamaged') recordDamage(event)
+      }
+      while (recentDamage[0] && tick - recentDamage[0].tick > maxCombatDamageAgeTicks) recentDamage.shift()
       for (const actor of seats.values()) {
-        if (deaths?.has(actor.characterId)) {
+        if (deaths.has(actor.characterId)) {
           actor.dead = true
           actor.pending.length = 0
         }
@@ -333,22 +422,24 @@ export function createMapRuntime(
           facing: player.action.kind === 'attack' ? player.action.facing : player.facing,
           hp: player.vitals.hp,
           maxHp: player.vitals.maxHp,
+          spawnProtected: player.spawnProtected && player.action.kind !== 'death',
         })),
-        monsters: monster
-          ? [
-              {
-                monsterId: monster.monsterId,
-                archetypeId: monster.archetypeId,
-                x: monster.position.x,
-                y: monster.position.y,
-                state: 'patrol',
-                facing: monster.facing,
-                hp: monster.hp,
-                maxHp: monster.maxHp,
-              },
-            ]
-          : [],
+        monsters: state.map.monsters.map((monster) => ({
+          monsterId: monster.monsterId,
+          generation: monster.generation,
+          archetypeId: monster.spawn.archetypeId,
+          x: monster.position.x,
+          y: monster.position.y,
+          state: monster.behavior.kind === 'chase' || monster.behavior.kind === 'return' ? 'patrol' : monster.behavior.kind,
+          facing: monster.facing,
+          hp: monster.hp,
+          maxHp: monster.spawn.maxHp,
+        })),
       }
+    },
+    combatDamageSince(previousTick: number): CombatDamageBatch | undefined {
+      const events = recentDamage.filter(({ tick }) => tick > previousTick)
+      if (events.length) return { mapInstanceId, serverTick: state.tick, events }
     },
     checkpoint(connection: object): MovementCheckpoint | undefined {
       const actor = bindings.get(connection)
@@ -365,7 +456,15 @@ export function createMapRuntime(
         serverTick: state.tick,
         lifeStartedTick,
         ackInputSeq,
-        controller: { position, physics, movement, facing, locomotion, action, lastHurtTick },
+        controller: {
+          position,
+          physics,
+          movement,
+          facing,
+          locomotion,
+          action: action.kind === 'attack' ? { kind: 'attack', facing: action.facing } : action,
+          lastHurtTick,
+        },
       }
     },
     dispose(): void {
@@ -373,10 +472,9 @@ export function createMapRuntime(
       seats.clear()
       bindings.clear()
       reservations.clear()
-      monster = undefined
-      pendingFixtureEvents.clear()
-      acceptedFixtureEvents.clear()
-      state = { ...state, map: { ...state.map, players: [] } }
+      recentDamage.length = 0
+      releaseRemovedClaims([])
+      state = { ...state, map: { ...state.map, players: [], monsters: [] } }
     },
   }
 }

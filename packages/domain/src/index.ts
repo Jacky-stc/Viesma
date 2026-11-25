@@ -18,6 +18,7 @@ export type {
   AttackId,
   CharacterId,
   DeathId,
+  EncounterId,
   ItemDefinitionId,
   ItemInstanceId,
   LootId,

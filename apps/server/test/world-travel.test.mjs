@@ -1,14 +1,16 @@
 import { loadGrayboxGameData } from '@viesma/game-data'
 import { PROTOCOL_VERSION } from '@viesma/protocol'
 import { findOverlappingPortal } from '@viesma/simulation'
+import { setImmediate } from 'node:timers/promises'
 import { expect, test, vi } from 'vitest'
+import { createMemoryEncounterRewardPort } from '../src/runtime/encounter-reward-worker.ts'
 import { createWorldCoordinator } from '../src/runtime/world-coordinator.ts'
 
-function harness(createDestination) {
+function harness(createDestination, data = loadGrayboxGameData(), dependencies = {}) {
   let now = 0
   let id = 0
   let wake
-  const world = createWorldCoordinator(loadGrayboxGameData(), 'hash', {
+  const world = createWorldCoordinator(data, 'hash', {
     clock: { nowMilliseconds: () => now },
     nextId: () => `id-${++id}`,
     schedule(callback) {
@@ -19,6 +21,7 @@ function harness(createDestination) {
     },
     onBacklog: vi.fn(),
     createDestination,
+    ...dependencies,
   })
   return {
     world,
@@ -39,6 +42,156 @@ function peer() {
 const session = (peer) => peer.joined.mock.lastCall[0]
 const offer = (peer) => peer.offer.mock.lastCall[0]
 const body = (room, peer) => room.player(session(peer).characterId)
+
+function dataWithSpawnNearSlime() {
+  const data = loadGrayboxGameData()
+  const tiledMaps = data.tiledMaps.map((map) =>
+    map.id === 'm1'
+      ? {
+          ...map,
+          spawns: map.spawns.map((spawn) => (spawn.id === 'spawn_from_village' ? { ...spawn, position: { x: 453, y: 848 } } : spawn)),
+        }
+      : map
+  )
+  return { ...data, tiledMaps }
+}
+
+test('damages a grace-disconnected body until expiry and never respawns monsters on reconnect', () => {
+  const { world, advance, setNow } = harness(undefined, dataWithSpawnNearSlime())
+  const room = world.createRoom()
+  const empty = world.createRoom()
+  const original = peer()
+  const initial = room.snapshot().monsters
+  const { monsterId } = initial.find(({ x, y }) => x === 465 && y === 896)
+  const emptyId = empty.snapshot().monsters.find(({ x, y }) => x === 465 && y === 896).monsterId
+  const slime = (room, id) => room.snapshot().monsters.find((monster) => monster.monsterId === id)
+  const ids = () => room.snapshot().monsters.map(({ monsterId }) => monsterId)
+  expect(world.join(room, original)).toBe(true)
+  advance()
+  const { characterId } = session(original)
+  world.leave(room, original.connection, true)
+  // 第 6 tick 開始前搖。第 15 tick 的有效階段仍可傷害 grace body。
+  for (let tick = 2; tick <= 15; tick++) advance()
+  expect(room.snapshot().serverTick).toBe(15)
+  expect(room.player(characterId)).toMatchObject({ vitals: { hp: 43 }, action: { kind: 'hurt', ticksRemaining: 6 } })
+  expect(slime(room, monsterId).x).toBe(475)
+  expect(slime(empty, emptyId).x).toBe(495)
+  expect(ids()).toEqual(initial.map(({ monsterId }) => monsterId))
+
+  let recovery = original
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const next = peer()
+    expect(world.reconnect(room, next, session(recovery).reconnectToken)).toBe(true)
+    expect(session(next).characterId).toBe(characterId)
+    expect(body(room, next).vitals.hp).toBe(43)
+    expect(ids()).toEqual(initial.map(({ monsterId }) => monsterId))
+    world.leave(room, next.connection, true)
+    recovery = next
+  }
+  setNow(29_999)
+  advance(0)
+  expect(room.player(characterId)).toBeDefined()
+  advance(1)
+  expect(room.player(characterId)).toBeUndefined()
+  expect(world.reconnect(room, peer(), session(recovery).reconnectToken)).toBe(false)
+  for (let wake = 0; wake < 21; wake++) advance(0)
+  expect(slime(room, monsterId).x).not.toBe(475)
+  expect(ids()).toEqual(initial.map(({ monsterId }) => monsterId))
+  world.disposeRoom(room)
+  world.disposeRoom(empty)
+})
+
+test('a lethal monster hit uses the existing 90-tick Village respawn handoff', () => {
+  const { world, advance } = harness(undefined, dataWithSpawnNearSlime())
+  const room = world.createRoom()
+  const village = world.createRoom('village')
+  const source = peer()
+  expect(world.join(room, source)).toBe(true)
+  advance()
+  function advanceTo(tick) {
+    while (room.snapshot().serverTick < tick) advance(1000 / 30)
+    expect(room.snapshot().serverTick).toBe(tick)
+  }
+  const player = body(room, source)
+  room.respawn(source.connection, { ...player, vitals: { ...player.vitals, hp: 7 } })
+  advanceTo(14)
+  expect(body(room, source).vitals.hp).toBe(7)
+  advanceTo(15)
+  expect(body(room, source)).toMatchObject({ vitals: { hp: 0 }, action: { kind: 'death', diedAtTick: 15 } })
+  advanceTo(104)
+  expect(source.offer).not.toHaveBeenCalled()
+  expect(request(world, room, source)).toBe(true)
+  advanceTo(105)
+  expect(source.failed).toHaveBeenCalledExactlyOnceWith({ requestId: 1, code: 'PORTAL_UNAVAILABLE' })
+  expect(source.offer).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requestId: null, mapId: 'village', mapEpoch: 1 }))
+  const destination = peer()
+  expect(claim(world, village, source, destination)).toBe(true)
+  advanceTo(106)
+  expect(room.player(player.characterId)).toBeUndefined()
+  expect(body(village, destination)).toMatchObject({
+    lifeStartedTick: 106,
+    vitals: { hp: 50, mp: 30 },
+    spawnProtected: true,
+    action: { kind: 'none' },
+  })
+  expect(claim(world, village, source, peer())).toBe(false)
+  advanceTo(195)
+  expect(village.snapshot().players).toMatchObject([{ spawnProtected: true, hp: 50 }])
+  advanceTo(196)
+  expect(village.snapshot().players).toMatchObject([{ spawnProtected: false, hp: 50 }])
+  expect(village.snapshot().monsters).toEqual([])
+  expect(body(village, destination).vitals).toMatchObject({ hp: 50, mp: 30 })
+  expect(destination.joined).toHaveBeenCalledOnce()
+  expect(source.offer).toHaveBeenCalledOnce()
+})
+
+test('simultaneous recoveries share one new Village when the existing instance is full', async () => {
+  let overflow
+  const createDestination = vi.fn((mapId) => {
+    overflow = world.createRoom(mapId)
+  })
+  const { world, advance } = harness(createDestination, dataWithSpawnNearSlime())
+  const m1 = world.createRoom()
+  const village = world.createRoom('village')
+  const players = [peer(), peer()]
+  for (let index = 0; index < 20; index++) expect(world.join(village, peer())).toBe(true)
+  for (const player of players) expect(world.join(m1, player)).toBe(true)
+  advance()
+  // 排入同一個 Death tick，專門驗證滿房時的 reservation 與交接。
+  for (const player of players) {
+    const live = body(m1, player)
+    m1.respawn(player.connection, { ...live, vitals: { ...live.vitals, hp: 0 }, action: { kind: 'death', diedAtTick: 1 } })
+  }
+  while (m1.snapshot().serverTick < 91) advance(1000 / 30)
+  await setImmediate()
+  expect(createDestination).toHaveBeenCalledExactlyOnceWith('village')
+  expect(village.snapshot().players).toHaveLength(20)
+  advance(1000 / 30)
+  const candidates = players.map((player) => {
+    expect(player.failed).not.toHaveBeenCalled()
+    expect(player.offer).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requestId: null, roomId: overflow.roomId }))
+    const candidate = peer()
+    expect(claim(world, overflow, player, candidate)).toBe(true)
+    return candidate
+  })
+  advance(1000 / 30)
+  expect(m1.snapshot().players).toEqual([])
+  expect(
+    overflow
+      .snapshot()
+      .players.map(({ characterId }) => characterId)
+      .sort()
+  ).toEqual(players.map((player) => session(player).characterId).sort())
+  for (const [index, candidate] of candidates.entries()) {
+    expect(candidate.joined).toHaveBeenCalledOnce()
+    expect(body(overflow, candidate)).toMatchObject({ vitals: { hp: 50, mp: 30 }, spawnProtected: true })
+    expect(claim(world, overflow, players[index], peer())).toBe(false)
+    expect(players[index].close).toHaveBeenCalledOnce()
+  }
+  world.disposeRoom(m1)
+  world.disposeRoom(village)
+  world.disposeRoom(overflow)
+})
 
 function walkToPortal({ world, advance }, room, ...peers) {
   advance()
@@ -75,6 +228,259 @@ function request(world, room, peer, requestId = 1, overrides = {}) {
 function claim(world, room, source, candidate, token = session(source).reconnectToken) {
   return world.acceptTransfer(room, candidate, offer(source).ticket, token)
 }
+
+function rewardHarness(createCommit = (memory) => vi.fn(memory.commitReward)) {
+  const data = loadGrayboxGameData()
+  const tiledMaps = data.tiledMaps.map((map) =>
+    map.id === 'm1'
+      ? {
+          ...map,
+          spawns: map.spawns.map((spawn) => (spawn.id === 'spawn_from_village' ? { ...spawn, position: { x: 411, y: 848 } } : spawn)),
+          monsterSpawns: map.monsterSpawns
+            .filter(({ id }) => id === 'spawn_slime_1')
+            .map((spawn) => ({ ...spawn, patrolMinX: 464, patrolMaxX: 466 })),
+          portals: map.portals.map((portal) =>
+            portal.id === 'p_to_village' ? { ...portal, bounds: { ...portal.bounds, origin: { x: 411, y: 848 } } } : portal
+          ),
+        }
+      : map
+  )
+  const memory = createMemoryEncounterRewardPort()
+  const rewardPort = { commitReward: createCommit(memory), releaseReceipt: vi.fn(memory.releaseReceipt) }
+  const h = harness(
+    undefined,
+    { ...data, tiledMaps },
+    {
+      rewardPort,
+      partyMembership: (id) => ({ kind: 'party', partyId: 'shared', membershipToken: `tenure:${id}` }),
+    }
+  )
+  const room = h.world.createRoom()
+  function advanceTo(tick) {
+    while (room.snapshot().serverTick < tick) h.advance(1000 / 30 + 0.0001)
+    expect(room.snapshot().serverTick).toBe(tick)
+  }
+  function attack(peer, seq) {
+    const { connectionEpoch, mapEpoch } = session(peer)
+    expect(
+      h.world.receive(room, peer.connection, {
+        protocolVersion: PROTOCOL_VERSION,
+        connectionEpoch,
+        mapEpoch,
+        seq,
+        moveX: 0,
+        jumpPressed: false,
+        attackPressed: true,
+      })
+    ).toBe(true)
+  }
+  return { ...h, room, advanceTo, attack, rewardPort }
+}
+
+test('a claimed portal ticket is invalidated when the source has an authoritative Death', () => {
+  const { world, room, advanceTo } = rewardHarness()
+  const village = world.createRoom('village')
+  const source = peer()
+  world.join(room, source)
+  advanceTo(1)
+  expect(request(world, room, source)).toBe(true)
+  advanceTo(2)
+  const ticket = offer(source).ticket
+  const portalCandidate = peer()
+  expect(claim(world, village, source, portalCandidate)).toBe(true)
+  const original = body(room, source)
+  // 注入提交前已確認的死亡，驗證過期票券與目的席位的清理。
+  room.respawn(source.connection, { ...original, action: { kind: 'death', diedAtTick: 2 }, vitals: { ...original.vitals, hp: 0, mp: 5 } })
+  advanceTo(3)
+  expect(portalCandidate.joined).not.toHaveBeenCalled()
+  expect(portalCandidate.close).toHaveBeenCalledOnce()
+  expect(village.hasRetainedSeats()).toBe(false)
+  expect(world.acceptTransfer(village, peer(), ticket, session(source).reconnectToken)).toBe(false)
+  expect(body(room, source).action.kind).toBe('death')
+  advanceTo(91)
+  expect(source.offer).toHaveBeenCalledOnce()
+  advanceTo(92)
+  expect(offer(source)).toMatchObject({ requestId: null, mapEpoch: 1 })
+  expect(offer(source).ticket).not.toBe(ticket)
+  const recovery = peer()
+  expect(claim(world, village, source, recovery)).toBe(true)
+  advanceTo(93)
+  world.leave(room, source.connection, true)
+  world.leave(village, portalCandidate.connection, true)
+  advanceTo(100)
+  expect(room.snapshot().players).toEqual([])
+  expect(village.snapshot().players).toMatchObject([{ characterId: original.characterId, lifeStartedTick: 93, hp: 50 }])
+  expect(body(village, recovery).vitals.mp).toBe(30)
+  expect(recovery.joined).toHaveBeenCalledOnce()
+  expect(source.offer).toHaveBeenCalledTimes(2)
+})
+
+test('projects RewardPending through failure and lost acknowledgment, then applies the receipt once on a fixed tick', async () => {
+  const confirmation = Promise.withResolvers()
+  let cachedReceipt
+  const { world, room, advanceTo, attack, rewardPort } = rewardHarness((memory) =>
+    vi
+      .fn()
+      .mockRejectedValueOnce(new Error('before commit'))
+      .mockImplementationOnce((intent) => {
+        cachedReceipt = memory.commitReward(intent)
+        return Promise.reject(new Error('acknowledgment lost'))
+      })
+      .mockImplementation((intent) => confirmation.promise.then(() => memory.commitReward(intent)))
+  )
+  const killer = peer()
+  const joiner = peer()
+  world.join(room, killer)
+  advanceTo(1)
+  const original = room.snapshot().monsters[0]
+  for (let seq = 1; seq <= 4; seq++) {
+    attack(killer, seq)
+    advanceTo(room.snapshot().serverTick + 18)
+  }
+  const pending = { monsterId: original.monsterId, generation: original.generation, state: 'rewardPending', hp: 0 }
+  const expectPending = () => expect(room.snapshot().monsters[0]).toMatchObject(pending)
+  const flush = async () => {
+    for (let index = 0; index < 8; index++) await Promise.resolve()
+  }
+  expectPending()
+  await flush()
+  advanceTo(74)
+  await flush()
+  expect(cachedReceipt).toBeDefined()
+  expectPending()
+  advanceTo(75)
+  await flush()
+  expect(rewardPort.commitReward).toHaveBeenCalledTimes(3)
+  expect(rewardPort.commitReward.mock.calls.every(([intent]) => intent === rewardPort.commitReward.mock.calls[0][0])).toBe(true)
+  world.join(room, joiner)
+  advanceTo(200)
+  expectPending()
+  expect(room.combatDamageSince(199)).toBeUndefined()
+  confirmation.resolve()
+  confirmation.resolve()
+  await flush()
+  expectPending()
+  advanceTo(201)
+  expect(room.snapshot().monsters[0]).toMatchObject({ monsterId: original.monsterId, state: 'dead', hp: 0 })
+  advanceTo(230)
+  expect(room.snapshot().monsters[0].state).toBe('dead')
+  advanceTo(231)
+  expect(room.snapshot().monsters[0].state).toBe('respawnWait')
+  advanceTo(530)
+  expect(room.snapshot().monsters[0].state).toBe('respawnWait')
+  advanceTo(531)
+  const next = room.snapshot().monsters[0]
+  expect(next).toMatchObject({ generation: 2, state: 'spawning', hp: 71 })
+  expect(next.monsterId).not.toBe(original.monsterId)
+  expect(rewardPort.releaseReceipt).toHaveBeenCalledExactlyOnceWith(cachedReceipt.deathId)
+  advanceTo(532)
+  expect(room.snapshot().monsters).toMatchObject([{ monsterId: next.monsterId, generation: 2, hp: 71, state: 'patrol' }])
+})
+
+test.each(['disconnected', 'reconnected', 'transferring', 'transferred', 'expired'])(
+  'freezes eligibility from the authoritative room when a first-hit contributor is %s',
+  async (status) => {
+    const { world, room, advanceTo, attack, rewardPort } = rewardHarness()
+    const origin = peer()
+    const finisher = peer()
+    const village = world.createRoom('village')
+    const independent = world.createRoom()
+    expect(world.join(room, origin)).toBe(true)
+    expect(world.join(room, finisher)).toBe(true)
+    advanceTo(1)
+    attack(origin, 1)
+    advanceTo(16)
+    const firstHp = room.snapshot().monsters[0].hp
+    expect(firstHp).toBe(51)
+    const { characterId, reconnectToken } = session(origin)
+    if (status === 'transferring' || status === 'transferred') {
+      expect(findOverlappingPortal(room.map, body(room, origin).position)?.id).toBe('p_to_village')
+      expect(request(world, room, origin)).toBe(true)
+      advanceTo(17)
+      expect(origin.offer).toHaveBeenCalledOnce()
+      if (status === 'transferred') {
+        const candidate = peer()
+        expect(claim(world, village, origin, candidate)).toBe(true)
+        advanceTo(18)
+        expect(village.player(characterId)).toBeDefined()
+        expect(room.player(characterId)).toBeUndefined()
+      }
+    } else {
+      world.leave(room, origin.connection, true)
+      expect(room.player(characterId)).toBeDefined()
+      if (status === 'reconnected') {
+        const rebound = peer()
+        expect(world.reconnect(room, rebound, reconnectToken)).toBe(true)
+        expect(session(rebound).characterId).toBe(characterId)
+      } else if (status === 'expired') {
+        advanceTo(930)
+        expect(room.player(characterId)).toBeUndefined()
+        expect(world.reconnect(room, peer(), reconnectToken)).toBe(false)
+      }
+    }
+    for (let seq = 1; seq <= 3; seq++) {
+      attack(finisher, seq)
+      advanceTo(room.snapshot().serverTick + 18)
+    }
+    await Promise.resolve()
+    expect(rewardPort.commitReward).toHaveBeenCalledOnce()
+    const [intent] = rewardPort.commitReward.mock.lastCall
+    const otherId = session(finisher).characterId
+    expect(intent.claim.mapInstanceId).toBe(room.mapInstanceId)
+    expect(intent.groups).toMatchObject([
+      {
+        groupKey: 'party:shared',
+        effectiveDamage: 71,
+        eligibleCharacterIds: status === 'reconnected' ? [characterId, otherId].sort() : [otherId],
+        contributions: expect.arrayContaining([
+          {
+            characterId,
+            effectiveDamage: 20,
+            lastDamageTick: 6,
+            lockedGroup: { kind: 'party', partyId: 'shared', membershipToken: `tenure:${characterId}` },
+          },
+        ]),
+      },
+    ])
+    expect(room.snapshot().monsters[0]).toMatchObject({ monsterId: intent.claim.monsterId, hp: 0 })
+    expect(independent.snapshot().monsters[0].hp).toBe(71)
+    await Promise.resolve()
+    advanceTo(room.snapshot().serverTick + 1)
+    if (status === 'transferring') expect(room.player(characterId)).toBeDefined()
+    world.disposeRoom(room)
+    world.disposeRoom(village)
+    world.disposeRoom(independent)
+    expect(room.snapshot().monsters).toEqual([])
+    expect(rewardPort.releaseReceipt).toHaveBeenCalledExactlyOnceWith(intent.claim.deathId)
+  }
+)
+
+test('settles an accepted reward after its last room is disposed without recreating the monster', async () => {
+  const { world, room, advance, advanceTo, attack, rewardPort } = rewardHarness((memory) =>
+    vi.fn(memory.commitReward).mockRejectedValueOnce(new Error('temporary failure'))
+  )
+  const commit = rewardPort.commitReward
+  const killer = peer()
+  expect(world.join(room, killer)).toBe(true)
+  advanceTo(1)
+  for (let seq = 1; seq <= 4; seq++) {
+    attack(killer, seq)
+    advanceTo(room.snapshot().serverTick + 18)
+  }
+  expect(room.snapshot().monsters[0].hp).toBe(0)
+  world.disposeRoom(room)
+  expect(room.snapshot().monsters).toEqual([])
+  for (let index = 0; index < 5; index++) await Promise.resolve()
+  expect(commit).toHaveBeenCalledOnce()
+  expect(rewardPort.releaseReceipt).not.toHaveBeenCalled()
+  advance()
+  for (let index = 0; index < 5; index++) await Promise.resolve()
+  expect(commit).toHaveBeenCalledTimes(2)
+  expect(commit.mock.calls[0][0]).toBe(commit.mock.calls[1][0])
+  advance()
+  expect(rewardPort.releaseReceipt).toHaveBeenCalledOnce()
+  expect(room.snapshot().monsters).toEqual([])
+})
 
 test('routes a stable actor through Village and M1 before either room steps, with a single private owner', () => {
   const h = harness()
@@ -128,7 +534,7 @@ test('routes a stable actor through Village and M1 before either room steps, wit
   village.advance.mockRestore()
   expect(m1.player(characterId)).toBeUndefined()
   expect(body(village, next)).toMatchObject({ vitals, lifeStartedTick: before.lifeStartedTick, position: { x: 1188, y: 656 } })
-  expect(m1.snapshot().monsters).toHaveLength(1)
+  expect(m1.snapshot().monsters).toHaveLength(10)
   expect(village.snapshot().monsters).toHaveLength(0)
   expect(session(next)).toMatchObject({ characterId, reconnectToken, mapEpoch: 1 })
   expect(session(next).connectionEpoch).not.toBe(connectionEpoch)

@@ -1,5 +1,6 @@
 import type { GuideDefinition, NormalizedMap } from '@viesma/game-data'
-import { Application, Container, type Graphics } from 'pixi.js'
+import type { CombatDamage } from '@viesma/protocol'
+import { Application, Container, Text, type Graphics } from 'pixi.js'
 import catalog from 'virtual:viesma-assets'
 import { createAtlasScope } from './assets/atlas-scope'
 import { indexSprites } from './assets/catalog'
@@ -23,6 +24,7 @@ export interface WorldRenderer {
       readonly guide?: GuideDefinition | undefined
       readonly peers?: ReadonlyMap<string, PlayerVisualFrame>
       readonly monsters?: ReadonlyMap<string, MonsterVisualFrame>
+      readonly damage?: readonly (CombatDamage & { readonly progress: number })[]
     }
   ): void
 }
@@ -77,12 +79,16 @@ export async function createWorldRenderer(
     const peerViews = new Map<string, ReturnType<typeof createBeginnerView>>()
     const monsters = new Container()
     const monsterViews = new Map<string, ReturnType<typeof createSharedMonsterView>>()
+    const damageLayer = new Container()
+    const damageViews = new Map<number, Text>()
     let mapSprites: ReturnType<typeof createMapSpriteView> | undefined
     function clearRoomSprites() {
       for (const view of peerViews.values()) view.root.destroy({ children: true, context: true })
       for (const view of monsterViews.values()) view.root.destroy()
+      for (const view of damageViews.values()) view.destroy()
       peerViews.clear()
       monsterViews.clear()
+      damageViews.clear()
     }
     releaseAssets = () => {
       mapSprites?.destroy()
@@ -90,13 +96,16 @@ export async function createWorldRenderer(
       clearRoomSprites()
       peers.destroy({ children: true, context: true })
       monsters.destroy({ children: true })
+      damageLayer.destroy({ children: true })
       if (diagnostics) {
         delete host.dataset.monsterSprites
         delete host.dataset.peerSprites
+        delete host.dataset.combatDamageSprites
+        delete host.dataset.combatDamageLabels
       }
       entityAssets.destroy()
     }
-    terrain.addChild(monsters, peers, player.root)
+    terrain.addChild(monsters, peers, player.root, damageLayer)
     app.stage.addChild(terrain)
 
     app.canvas.setAttribute('role', 'img')
@@ -141,6 +150,35 @@ export async function createWorldRenderer(
         terrain.scale.set(camera.scale)
         terrain.position.set(-camera.origin.x * camera.scale, -camera.origin.y * camera.scale)
         mapSprites?.draw(frame.visualTick)
+        const damageIds = new Set<number>()
+        const hurtMonsters = new Set<string>()
+        for (const hit of frame.damage ?? []) {
+          damageIds.add(hit.id)
+          if (hit.kind === 'monster' && hit.progress < 0.2) hurtMonsters.add(hit.targetId)
+          let view = damageViews.get(hit.id)
+          if (!view) {
+            view = new Text({
+              text: String(hit.amount),
+              anchor: 0.5,
+              style: { fontSize: 20, fontWeight: 'bold', fill: hit.critical ? 0xffdb75 : 0xffffff, stroke: { color: 0x2c1c21, width: 3 } },
+            })
+            damageViews.set(hit.id, view)
+            damageLayer.addChild(view)
+          }
+          view.position.set(hit.x + (hit.kind === 'player' ? body.width / 2 : 0), hit.y - 22 - 32 * hit.progress)
+          view.alpha = Math.min(1, 2 * (1 - hit.progress))
+        }
+        for (const [id, view] of damageViews) {
+          if (damageIds.has(id)) continue
+          view.destroy()
+          damageViews.delete(id)
+        }
+        if (diagnostics && frame.damage) {
+          const visibleDamage = [...damageViews.keys()].join(',')
+          const damageLabels = [...damageViews].map(([id, view]) => `${id}:${view.text}`).join(',')
+          if (host.dataset.combatDamageSprites !== visibleDamage) host.dataset.combatDamageSprites = visibleDamage
+          if (host.dataset.combatDamageLabels !== damageLabels) host.dataset.combatDamageLabels = damageLabels
+        }
         for (const [id, view] of monsterViews) {
           if (!frame.monsters?.has(id)) {
             view.root.destroy()
@@ -156,7 +194,7 @@ export async function createWorldRenderer(
               monsterViews.set(id, view)
               monsters.addChild(view.root)
             }
-            if (view.draw(monster)) visibleIds?.push(id)
+            if (view.draw(monster, hurtMonsters.has(id))) visibleIds?.push(id)
           }
           if (visibleIds) {
             const spriteIds = visibleIds.join(',')

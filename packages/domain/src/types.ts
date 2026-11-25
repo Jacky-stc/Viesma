@@ -5,6 +5,7 @@ type Branded<Value, Name extends string> = Value & { readonly [brand]: { readonl
 export type AccountId = Branded<string, 'AccountId'>
 export type CharacterId = Branded<string, 'CharacterId'>
 export type MonsterId = Branded<string, 'MonsterId'>
+export type EncounterId = Branded<string, 'EncounterId'>
 export type MapId = Branded<string, 'MapId'>
 export type MapInstanceId = Branded<string, 'MapInstanceId'>
 export type AttackId = Branded<string, 'AttackId'>

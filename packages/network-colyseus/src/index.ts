@@ -13,6 +13,7 @@ const PlayerSchema = schema(
     maxHp: t.float64(),
     mapEpoch: t.float64(),
     lifeStartedTick: t.float64(),
+    spawnProtected: t.boolean(),
   },
   'ViesmaPlayer'
 )
@@ -27,6 +28,7 @@ const MonsterSchema = schema(
     facing: t.string(),
     hp: t.float64(),
     maxHp: t.float64(),
+    generation: t.float64(),
   },
   'ViesmaMonster'
 )
@@ -72,7 +74,7 @@ export function updateMapRoomSchema(state: MapRoomState, { players, monsters, ..
 export function readPublicPlayers(state: MapRoomState): PublicPlayer[] {
   const players: PublicPlayer[] = []
   for (const [id, player] of state.players) {
-    const { characterId, x, y, state: action, facing, hp, maxHp, mapEpoch, lifeStartedTick } = player
+    const { characterId, x, y, state: action, facing, hp, maxHp, mapEpoch, lifeStartedTick, spawnProtected } = player
     if (
       id !== characterId ||
       !isNonNegativeSafeInteger(mapEpoch) ||
@@ -85,6 +87,7 @@ export function readPublicPlayers(state: MapRoomState): PublicPlayer[] {
       maxHp <= 0 ||
       hp < 0 ||
       hp > maxHp ||
+      typeof spawnProtected !== 'boolean' ||
       (facing !== 'left' && facing !== 'right')
     )
       continue
@@ -96,7 +99,7 @@ export function readPublicPlayers(state: MapRoomState): PublicPlayer[] {
       case 'attack':
       case 'hurt':
       case 'death':
-        players.push({ characterId, x, y, state: action, facing, hp, maxHp, mapEpoch, lifeStartedTick })
+        players.push({ characterId, x, y, state: action, facing, hp, maxHp, mapEpoch, lifeStartedTick, spawnProtected })
     }
   }
   return players
@@ -105,23 +108,28 @@ export function readPublicPlayers(state: MapRoomState): PublicPlayer[] {
 export function readPublicMonsters(state: MapRoomState): PublicMonster[] {
   const monsters: PublicMonster[] = []
   for (const [id, monster] of state.monsters) {
-    const { monsterId, archetypeId, x, y, state: action, facing, hp, maxHp } = monster
+    const { monsterId, generation, archetypeId, x, y, state: action, facing, hp, maxHp } = monster
     if (
       id !== monsterId ||
       !monsterId ||
+      !isNonNegativeSafeInteger(generation) ||
+      generation === 0 ||
       !archetypeId ||
       !Number.isFinite(x) ||
       !Number.isFinite(y) ||
       !Number.isSafeInteger(maxHp) ||
       maxHp <= 0 ||
       !Number.isSafeInteger(hp) ||
-      hp <= 0 ||
+      hp < 0 ||
       hp > maxHp ||
-      (facing !== 'left' && facing !== 'right') ||
-      action !== 'patrol'
+      (facing !== 'left' && facing !== 'right')
     )
       continue
-    monsters.push({ monsterId, archetypeId, x, y, state: action, facing, hp, maxHp })
+    const defeated = action === 'rewardPending' || action === 'dead' || action === 'respawnWait'
+    const alive = action === 'patrol' || action === 'attack' || action === 'spawning'
+    if ((defeated && hp === 0) || (alive && hp > 0)) {
+      monsters.push({ monsterId, generation, archetypeId, x, y, state: action, facing, hp, maxHp })
+    }
   }
   return monsters.sort((left, right) => (left.monsterId < right.monsterId ? -1 : Number(left.monsterId > right.monsterId)))
 }

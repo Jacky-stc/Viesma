@@ -1,3 +1,10 @@
+export {
+  maxCombatDamageAgeTicks,
+  maxCombatDamageEvents,
+  parseCombatDamageBatch,
+  type CombatDamage,
+  type CombatDamageBatch,
+} from './combat-damage.js'
 export { PROTOCOL_VERSION, checkJoinVersion, type JoinVersion, type JoinVersionResult } from './join-version.js'
 export { parseInputFrame, parseMapRoomJoin } from './map-room.js'
 export type { InputFrame, MapRoomJoin, PublicMapRoom, PublicMonster, PublicPlayer, PublicRoomHeader } from './map-room.js'
@@ -22,6 +29,7 @@ export const villageMapRoomName = 'village'
 export const inputFrameMessage = 'InputFrame'
 export const mapRoomJoinedMessage = 'MapRoomJoined'
 export const movementCheckpointMessage = 'MovementCheckpoint'
+export const combatDamageMessage = 'CombatDamage'
 export const interactPortalMessage = 'InteractPortal'
 export const transferOfferMessage = 'TransferOffer'
 export const transferFailureMessage = 'TransferFailure'

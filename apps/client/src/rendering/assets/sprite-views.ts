@@ -1,4 +1,5 @@
 import type { MapPoint, NormalizedMap } from '@viesma/game-data'
+import type { PublicMonster } from '@viesma/protocol'
 import { Container, Sprite } from 'pixi.js'
 import { facingScale, type PlayerVisualFrame } from '../player-view'
 import { createBeginnerGraphics } from '../world-graphics'
@@ -15,6 +16,7 @@ export interface MonsterVisualFrame {
   readonly facing: PlayerVisualFrame['facing']
   readonly visualTick: number
   readonly archetypeId: string
+  readonly state: PublicMonster['state']
 }
 
 const monsterVisualIds = new Map<string, string>(Object.entries(visualIds.monsters))
@@ -61,12 +63,16 @@ export function createSharedMonsterView(assets: AtlasScope) {
   const root = new Sprite({ anchor: { x: 0.5, y: 1 }, visible: false })
   return {
     root,
-    draw(frame: MonsterVisualFrame): boolean {
+    draw(frame: MonsterVisualFrame, hurt: boolean): boolean {
       const id = monsterVisualIds.get(frame.archetypeId)
       if (id) assets.prepare(id)
-      drawSprite(root, id ? assets.resolve(id, 'idle', frame.visualTick) : undefined)
-      root.position.set(frame.position.x, frame.position.y)
-      root.scale.x = Math.abs(root.scale.x) * facingScale[frame.facing]
+      const { state, position, facing, visualTick } = frame
+      drawSprite(root, id && state !== 'respawnWait' ? assets.resolve(id, 'idle', state === 'dead' ? 0 : visualTick) : undefined)
+      root.position.set(position.x, position.y)
+      root.rotation = state === 'dead' ? -Math.PI / 2 : state === 'attack' ? 0.17 * facingScale[facing] : 0
+      root.alpha = state === 'rewardPending' ? 0.55 : state === 'dead' ? 0.7 : 1
+      root.tint = hurt ? 0xff9b94 : state === 'attack' ? 0xffbe79 : state === 'spawning' ? 0xbbffe5 : 0xffffff
+      root.scale.x = Math.abs(root.scale.x) * facingScale[facing]
       return root.visible
     },
   }

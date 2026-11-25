@@ -42,12 +42,14 @@ export interface PublicPlayer extends WorldPoint {
   readonly facing: 'left' | 'right'
   readonly hp: number
   readonly maxHp: number
+  readonly spawnProtected: boolean
 }
 
 export interface PublicMonster extends WorldPoint {
   readonly monsterId: string
+  readonly generation: number
   readonly archetypeId: string
-  readonly state: 'patrol'
+  readonly state: 'patrol' | 'attack' | 'rewardPending' | 'dead' | 'respawnWait' | 'spawning'
   readonly facing: 'left' | 'right'
   readonly hp: number
   readonly maxHp: number

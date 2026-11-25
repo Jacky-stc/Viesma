@@ -23,6 +23,7 @@ export interface PlayerInputCommand extends MovementInput {
   readonly characterId: CharacterId
   readonly lifeStartedTick: SimulationTick
   readonly seq: NonNegativeSafeInteger
+  readonly attackPressed?: boolean
 }
 
 export interface LocalMapInputCommand extends PlayerInputCommand {
@@ -71,9 +72,12 @@ function parsePlayerInputCommand(
 ): LocalMapInputCommand | PlayerInputCommand | undefined {
   if (!isPlainRecord(value)) return undefined
   const hasNpcInteraction = expectedMapEpoch !== undefined && Object.hasOwn(value, 'npcInteraction')
-  const fields = expectedMapEpoch === undefined ? commandFields : mapCommandFields
-  if (!hasExactFields(value, hasNpcInteraction ? [...fields, 'npcInteraction'] : fields)) return undefined
-  const { kind, characterId, lifeStartedTick, seq: rawSeq, moveX, jumpPressed, mapEpoch, portalPressed } = value
+  const hasAttack = Object.hasOwn(value, 'attackPressed')
+  const fields: string[] = [...(expectedMapEpoch === undefined ? commandFields : mapCommandFields)]
+  if (hasNpcInteraction) fields.push('npcInteraction')
+  if (hasAttack) fields.push('attackPressed')
+  if (!hasExactFields(value, fields)) return undefined
+  const { kind, characterId, lifeStartedTick, seq: rawSeq, moveX, jumpPressed, attackPressed, mapEpoch, portalPressed } = value
   const seq = rawSeq === 0 ? 0 : rawSeq
   if (
     kind !== 'input' ||
@@ -82,7 +86,8 @@ function parsePlayerInputCommand(
     !isNonNegativeSafeInteger(lifeStartedTick) ||
     !isNonNegativeSafeInteger(seq) ||
     (moveX !== -1 && moveX !== 0 && moveX !== 1) ||
-    typeof jumpPressed !== 'boolean'
+    typeof jumpPressed !== 'boolean' ||
+    (hasAttack && typeof attackPressed !== 'boolean')
   ) {
     return undefined
   }
@@ -94,6 +99,7 @@ function parsePlayerInputCommand(
     seq,
     moveX: moveX || 0,
     jumpPressed,
+    ...(attackPressed === true && { attackPressed }),
   }
   if (expectedMapEpoch === undefined) return command
   if (mapEpoch !== expectedMapEpoch || typeof portalPressed !== 'boolean') return undefined
@@ -134,6 +140,7 @@ export function selectInputCommands(
       command.seq === previous.command.seq &&
       (command.moveX !== previous.command.moveX ||
         command.jumpPressed !== previous.command.jumpPressed ||
+        command.attackPressed !== previous.command.attackPressed ||
         ('portalPressed' in command && 'portalPressed' in previous.command && !mapInputsMatch(command, previous.command)))
     ) {
       selected.set(command.characterId, { command: previous.command, conflict: true })

@@ -4,6 +4,7 @@ import { initialPhysicsBalance, loadGrayboxGameData, serializeMapManifest, type 
 import { MapRoomSchema, readPublicMonsters, readPublicPlayers, type MapRoomState } from '@viesma/network-colyseus'
 import {
   cancelTransferMessage,
+  combatDamageMessage,
   inputFrameMessage,
   interactPortalMessage,
   mapRoomJoinedMessage,
@@ -30,11 +31,12 @@ import {
 } from '@viesma/simulation'
 import { attachBrowserInput } from '../input/browser-input'
 import { createWorldRenderer } from '../rendering/world-renderer'
+import { createCombatPresentation } from './combat-presentation'
 import { createCorrectionPresentation } from './correction-presentation'
 import { createLocalPrediction } from './local-prediction'
 import { createRemotePresentation } from './remote-presentation'
 
-export type MultiplayerPresentation = Pick<PublicPlayer, 'hp' | 'maxHp' | 'state' | 'facing'> & {
+export type MultiplayerPresentation = Pick<PublicPlayer, 'hp' | 'maxHp' | 'state' | 'facing' | 'spawnProtected'> & {
   readonly players: number
   readonly mapName: string
 }
@@ -51,6 +53,7 @@ interface RoomScene {
   readonly map: NormalizedMap
   readonly correction: ReturnType<typeof createCorrectionPresentation>
   readonly remote: ReturnType<typeof createRemotePresentation>
+  readonly combat: ReturnType<typeof createCombatPresentation>
   binding?: MapRoomSession
   prediction?: ReturnType<typeof createLocalPrediction>
   latest?: { self: PublicPlayer; serverTick: number; mapInstanceId: string }
@@ -92,6 +95,7 @@ const diagnosticKeys = [
   'multiplayerSceneRevision',
   'localAuthorityX',
   'localPredictedX',
+  'combatDamageSeen',
 ] as const
 
 export async function runMultiplayer(
@@ -144,6 +148,7 @@ export async function runMultiplayer(
     scene.prediction?.dispose()
     scene.correction.reset()
     scene.remote.clear()
+    scene.combat.clear()
     void scene.room.leave(consented)
   }
 
@@ -171,6 +176,7 @@ export async function runMultiplayer(
     if (active) {
       stopInput(active)
       active.remote.clear()
+      active.combat.clear()
     }
     travel = undefined
     recovery = {
@@ -258,10 +264,12 @@ export async function runMultiplayer(
       map,
       correction: createCorrectionPresentation(map),
       remote: createRemotePresentation(),
+      combat: createCombatPresentation(),
       requestId: 0,
       detach: () => {
         unbindJoin()
         unbindCheckpoint()
+        unbindCombatDamage()
         unbindOffer()
         unbindFailure()
         room.onStateChange.remove(receiveState)
@@ -292,6 +300,7 @@ export async function runMultiplayer(
       const { serverTick, mapInstanceId, mapId } = state
       const peers = players.filter((player) => player !== self)
       const monsters = readPublicMonsters(state)
+      scene.combat.snapshot(mapInstanceId, serverTick, players, monsters)
       scene.remote.receive(
         { mapInstanceId, mapId, connectionEpoch: binding.connectionEpoch, mapEpoch: self.mapEpoch },
         serverTick,
@@ -316,6 +325,9 @@ export async function runMultiplayer(
       }
       scene.binding = binding
       receiveState(room.state)
+    })
+    const unbindCombatDamage = room.onMessage(combatDamageMessage, (payload: unknown) => {
+      if (isCurrent() && active === scene && !recovery) scene.combat.receive(payload, performance.now())
     })
     const unbindCheckpoint = room.onMessage(movementCheckpointMessage, (payload: unknown) => {
       const { binding, latest, correction } = scene
@@ -491,29 +503,41 @@ export async function runMultiplayer(
     const self = scene?.prediction?.predicted
     if (!scene?.latest || !self) return
     const { controller, tick } = self
-    const state = getPlayerPresentationState(controller)
+    const { hp, maxHp, state: authoritativeState, spawnProtected } = scene.latest.self
+    const state = authoritativeState === 'death' ? 'death' : getPlayerPresentationState(controller)
     const facing = controller.action.kind === 'attack' ? controller.action.facing : controller.facing
     const position = scene.correction.positionAt(controller.position, now)
     const { peers, monsters } = scene.remote.sample(now)
-    renderer.render({ position, state, facing, visualTick: tick, map: scene.map, peers, monsters })
+    renderer.render({
+      position,
+      state,
+      facing,
+      visualTick: state === 'death' ? scene.latest.serverTick : tick,
+      map: scene.map,
+      peers,
+      monsters,
+      damage: scene.combat.sample(now),
+    })
     if (diagnostics) {
       const peer = peers.values().next().value
       const trace = peer ? JSON.stringify({ ...peer.position, tick: peer.visualTick, mode: peer.mode }) : ''
       if (host.dataset.remoteFrame !== trace) host.dataset.remoteFrame = trace
       const predictedX = String(controller.position.x)
       if (host.dataset.localPredictedX !== predictedX) host.dataset.localPredictedX = predictedX
+      const damageSeen = String(scene.combat.receivedCount())
+      if (host.dataset.combatDamageSeen !== damageSeen) host.dataset.combatDamageSeen = damageSeen
     }
-    const { hp, maxHp } = scene.latest.self
     const players = peers.size + 1
     if (
       players !== previous?.players ||
       hp !== previous.hp ||
       maxHp !== previous.maxHp ||
+      spawnProtected !== previous.spawnProtected ||
       state !== previous.state ||
       facing !== previous.facing
     ) {
       const mapName = data.world.maps.find(({ id }) => id === scene.map.id)?.name ?? scene.map.id
-      previous = { hp, maxHp, state, facing, players, mapName }
+      previous = { hp, maxHp, state, facing, players, mapName, spawnProtected }
       publish(previous)
     }
   }

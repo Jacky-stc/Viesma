@@ -1,6 +1,7 @@
 import type {
   AttackId,
   CharacterId,
+  EncounterId,
   MapId,
   MapInstanceId,
   MembershipToken,
@@ -18,8 +19,8 @@ export interface Player {
 
 export interface Monster {
   readonly monsterId: MonsterId
+  readonly encounterId: EncounterId
   readonly position: WorldPoint
-  readonly contributions: readonly Contribution[]
 }
 
 export interface MapState {

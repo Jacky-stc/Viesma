@@ -126,9 +126,9 @@ Server 以單一 fixed scheduler 每 1/30 秒推進所有 rooms，rooms 按 stab
 1. 套用已提交的 command results、session／transfer 狀態；PartyService 處理先前收到的 membership commands。
 2. 各 map consume 有效 input，進行 player physics／action windup。
 3. Monster target selection／movement／action windup。
-4. Player active attacks 按 `(acceptedTick, characterId, inputSeq)`，每次命中更新 HP 與 contribution；首次 HP=0 立即 claim death 並 freeze reward snapshot。
-5. 仍存活 monsters 的 active attacks；處理 player Death、respawn timer、monster lifecycle。
-6. 產生 public projection／private deltas／visual events，將 immutable reward intents 交給 worker。
+4. Player active attacks 按 `(acceptedTick, characterId, inputSeq)` 更新 HP 並記錄 EffectiveDamage。首次 HP=0 同步建立 death claim 與 reward snapshot，立即停止該怪物戰鬥。
+5. 依 monster ID 結算仍合格的 monster active attacks，每次重新驗證角色、生命、距離、遮擋與保護，透過既有生命週期進入 Hurt 或 Death。
+6. 產生 public projection 及本人 checkpoint。後續里程碑接入 private deltas、visual events 與 reward intents。
 
 Death snapshot 當下符合條件者之後同 tick 被 monster 打死，仍保留該次 reward；這是先 player hits 再 monster hits 的既定規則。Party changes 不插入 tick 中間，避免 rooms 之間讀到半更新 roster。
 
@@ -180,7 +180,7 @@ Client 以同樣30Hz跑 local physics，render 以 `requestAnimationFrame` 自�
 - 本機 server 註冊 `map`（M1）及 `village` 房型。開發角色初次進入 M1。Colyseus 管理 WebSocket、一次性 transport seat、逾時及空房銷毀。傳送與重連另由 WorldCoordinator 驗證角色所有權及 application seat。
 - 每個 server 建立一個 WorldCoordinator。第一間房註冊時啟動單一 monotonic `createFixedTickDriver`，依 map instance ID 順序同步步進各房。新房以當前 world tick 為起點。房間各自擁有 state、actor registry 與待處理輸入。補跑以每次喚醒最多 5 ticks 為限，維持 `dt = 1 / 30`，剩餘時間留到下次喚醒。補跑尚有欠步時記錄告警並暫停新連線入房，追上後恢復。最後一房離開 coordinator 時停止 scheduler。
 - 初次 Join 在 tick 邊界以 `m1/spawn_from_village` 建立 body。主動離房立即撤銷輸入並釋放角色席位，下一 tick 移除 body。異常斷線進入 §6 的重連保留期。房間銷毀會清空房間狀態並解除 scheduler 註冊。
-- 線上 `InputFrame` 驗證 exact fields、版本、連線／地圖 epoch、序號和型別。每角色以 40/s、burst 80 限流，WebSocket payload 上限為 4 KiB。M3.1 使用單幀暫存，M3.2 接入 §5.1 的有界佇列與 §5.2 的本人 checkpoint。線上角色可左右移動及跳躍，Attack edge 保留供後續任務使用。
+- 線上 `InputFrame` 驗證 exact fields、版本、連線／地圖 epoch、序號和型別。每角色以 40/s、burst 80 限流，WebSocket payload 上限為 4 KiB。M4.2 將 §5.1 佇列出隊的 `attackPressed` 與角色、生命及輸入序號綁定，交給 simulation 安排攻擊。含 damage、HP、attack ID、hit result 或 target 位置的輸入幀整筆拒絕。
 - `@viesma/protocol` 定義 wire DTO。Server 把 domain state 投影成角色 ID、左上角座標、朝向、狀態與 HP／MaxHP，再由 `@viesma/network-colyseus` 的 Schema 送出。公開房間欄位包含 map ID、map instance ID、內容 hash 與 server tick。Colyseus 每 100 ms 評估一次最新快照。只有本人收到自己的角色 ID 與連線／地圖 epoch。
 - Browser 以同一份地圖資料計算版本資訊並檢查入房版本。線上模式提供匿名開發角色、即時移動、M1 ↔ Village 傳送及重連。本地模式提供七圖走訪。
 
@@ -207,7 +207,7 @@ Input seq 在 connection epoch 內單調遞增。Server 拒絕舊 epoch、已見
 
 ### 5.2 Server → client
 
-- **Public Schema，10 Hz**。房間包含 `serverTick`、`mapId`、`mapInstanceId` 與 `mapContentHash`。角色投影含位置、朝向、狀態、HP／MaxHP、`mapEpoch` 和 `lifeStartedTick`。`mapEpoch` 屬於個別角色。測試怪物投影含 `monsterId`、archetype、腳底中心位置、朝向、巡邏狀態與 HP／MaxHP。以房間 tick 為共用時間軸。Server 建立獨立的 plain DTO，Colyseus 以 ID 更新或移除 Schema 項目。連線 epoch 與本人 checkpoint 仍走 owner channel。
+- **Public Schema，10 Hz**。房間包含 `serverTick`、`mapId`、`mapInstanceId` 與 `mapContentHash`。角色投影含位置、朝向、狀態、HP／MaxHP、`mapEpoch` 和 `lifeStartedTick`。`mapEpoch` 屬於個別角色。怪物投影含 `monsterId`、archetype、位置錨點、朝向、`patrol` 表現值與 HP／MaxHP。以房間 tick 為共用時間軸。Server 建立獨立的 plain DTO，Colyseus 以 ID 更新或移除 Schema 項目。連線 epoch 與本人 checkpoint 仍走 owner channel。
 - **Self movement checkpoint，10 Hz owner-only**。`MovementCheckpoint` 在同 tick 的 public patch 之後由 server 專門發給本人，帶版本、角色、map instance、connection／map epoch、生命開始 tick 及 server tick。`ackInputSeq` 是累積結案邊界，初值為 `null`，在權威步進完成後才更新。它涵蓋已套用、衝突、過期、淘汰或滿隊拒收的幀，以及較新序號關閉的缺口。ACK 不跨過最早未決幀，佇列清空後涵蓋已結案的尾端。控制器自己的 `lastProcessedInputSeq` 和 `lastInputTick` 則記錄實際套用的輸入。完整狀態包含 position、velocity、grounded／void、水平意圖、jump buffer／coyote、facing、locomotion、action 及最近受擊 tick。HP／MaxHP 沿用公開投影。
 - **Reliable visual messages**：attack／damage／death／respawn event，含 eventId 與 tick；純顯示事件可在 reconnect 丟棄，不重播舊 damage numbers。EventId 做短期去重。
 - **Owner-only messages**：character／bag／equipment snapshot、loot snapshot／delta、request result、reward receipt。`privateRevision` 不連續時重新要求完整 snapshot；重新入房／重連一定重建完整 owner view。
@@ -234,7 +234,7 @@ Server 公告 `protocolVersion`、`balanceVersion` 與 `mapContentHash`。所有
 
 七圖 graybox 的 Tiled JSON 同時作為編輯來源與發行匯出。呼叫端提供已解碼的 JSON 與外部 tileset，game-data 載入時驗證每張供應的地圖、manifest 引用和出生幾何，回傳不可變的 tile layers 及 M1.1 相容碰撞資料。完整 graybox 載入另外要求七圖都存在，使 12 個方向的傳送門都有實際目的地。Simulation 使用已驗證的資料，renderer 可使用獨立的 tile layers。Canonical manifest 納入正規化的地圖內容，asset license reference 由 M2.4 驗證。 [Tiled 地圖製作指南](TILED_MAPS.md) · [GAME_DATA](GAME_DATA.md)
 
-MapRoom 持有一份 shared monster simulation，`maxClients=20` 加上 application seat registry 的 reservation 檢查。Connection seat 與 character seat 分開計數，短暫 socket handover 不能多出第21個 character。Room key 為 `(nodeBootId, mapId, instanceSequence)`；map instance 不持久化，personal loot 另有可 rebind durable records。
+每個 MapRuntime 持有一份 map simulation，包含該房的共享怪物集合。`maxClients=20` 加上 application seat registry 的 reservation 檢查。Connection seat 與 character seat 分開計數，短暫 socket handover 不能多出第21個 character。Room key 為 `(nodeBootId, mapId, instanceSequence)`；map instance 不持久化，personal loot 另有可 rebind durable records。
 
 M3.4 由 WorldCoordinator 獨占角色路由，以穩定的 `characterId` 識別角色，以具體 socket 綁定及 `connectionEpoch` 驗證私有通道。MapRuntime 擁有角色席位、輸入佇列與唯一的 simulation body。預留的目的席位在交接前沒有 body 或輸入權限。同一角色每個 world tick 至多步進一次，只有當前綁定可收到 owner-only checkpoint。舊連線的輸入、離房與逾時回呼均需核對當前綁定。提交前失敗回來源，提交後從目的地恢復。
 
@@ -246,18 +246,30 @@ M3.4 由 WorldCoordinator 獨占角色路由，以穩定的 `characterId` 識別
 
 匿名角色的 reconnect 憑證由 server 產生，只能用於該角色的保留席位，活躍綁定存在時拒絕重連。成功重連輪替憑證及 `connectionEpoch`。在新連線收到有效輸入前，保留本次出示的憑證供入房確認遺失時重試。有效傳送請求或 ticket claim 也可完成確認。憑證僅在本人訊息、matchmaking POST body 及兩端記憶體中傳遞。公開投影、URL、診斷及應用日誌省略憑證。
 
-Browser 在交接期間暫停輸入，切換成功後由目的 room 及 checkpoint 重建 prediction、序號、校正與遠端插值，清理 peer／monster sprite 並以目的圖重算 camera，沿用單一 canvas。實體 Up 的按住來源保留至放開。離開舊 room 後解除 listener，新狀態由新的房間與角色世代驗證。M7 接入正式帳號驗證、play lease 與 durable recovery。
+Browser 在交接期間暫停輸入，切換成功後由目的 room 及 checkpoint 重建 prediction、序號、校正與遠端插值，清理 peer／monster sprite 及傷害數字並以目的圖重算 camera，沿用單一 canvas。實體 Up 的按住來源保留至放開。離開舊 room 後解除 listener，新狀態由新的房間與角色世代驗證。M7 接入正式帳號驗證、play lease 與 durable recovery。
+
+M4.4 已確認的 Death 優先於 portal 選擇。既有 portal 票券與預留席位一併撤銷，返村票券綁定死亡 tick，claim 與提交都核對來源生命。死亡滿 90 ticks 時可以發出返村 offer。現有 Village 滿房時，死亡回復可共用一次新 Village 建立作業，完成後各自預留目的席位。建立或預留失敗時，角色保持 Death 並由原路由重試。目的連線提交後建立同一角色的新生命，補滿 HP／MP，並從抵達 tick 起計 90 ticks 生成保護。Village 持續停用戰鬥。
 
 ## 7. Shared monster 與 reward pipeline
 
-M3.3 的 M1 房間各自從已驗證的 `spawn_slime_1` 建立一隻 Slime。使用該點的 Tiled 地板和巡邏區間、archetype 巡邏速度及依等級計算的 MaxHP。純 TypeScript 以 30 Hz tick 推進地面往返，runtime 持有獨立的狀態與穩定 ID。房間內的伺服器測試介面可在 tick 邊界覆寫成測試 HP（MaxHP 的一半，向下取整且最低為 1）並移除 fixture。每種事件每房僅套用一次，且沒有 client message handler。角色離開不移除怪物。房間 dispose 清除怪物與待處理事件，重新建房取得新 ID；加入存活房間則讀取當前的 fixture 狀態。
+M4.1 將怪物的唯一權威狀態放在 `SimulationState.map.monsters`。MapRuntime 建房時將已驗證的出生配置轉為純 simulation 定義，注入 ID、RNG 與 solid 掃掠函式。每個 room 從 spawn ID 的字典序分配 ID，在固定 tick 依 monster ID 順序更新及投影。角色先完成當 tick 的移動與生命週期，再供怪物選擇目標。交接凍結的角色暫不參與該 tick，重連 grace 仍保有 body 的角色照常參與。
 
-M4.1 擴充 AI 前，先將 `MonsterFixture` 狀態移入 `SimulationState.map.monsters`。純 `step` 在有無玩家時均每 tick 更新一次。房間提供已驗證的定義及測試事件，對外從該集合投影。
+M1 啟用已驗證的 10 個出生點，Village 維持安全區，Bat 以現有 M2 地圖資料與測試用幾何驗證。房間仍存活時空房繼續步進，晚加入和重連讀取當前投影。M4.4 退役 M3.3 的半血／移除指令；測試以出生配置、輸入與 reward port 注入條件。銷毀房間時清除實體及傷害訊息緩衝。
 
-完整戰鬥與獎勵階段依下列契約交付。
+Return 到出生點後重置 HP、攻擊與 aggro 狀態，記錄重置 tick 並分配新 encounter ID，保留原 monster ID 與 generation。M4.4 的 Protocol v4 公開快照包含怪物 HP、generation 與表現狀態（`patrol`、`attack`、`rewardPending`、`dead`、`respawnWait`、`spawning`），以及角色的重生保護狀態。AI 目標、encounter ID、帳本及獎勵資格留在伺服器。
+
+同房快照以 server tick 遞增套用。角色及怪物動作、死亡和新生世代由快照呈現。另以 `CombatDamage` 傳送伺服器有效傷害，附 map instance、事件序號、結算 tick、目標位置及生命／世代。每房保留最近 12 ticks、至多 128 筆供下一次公開 patch 後傳送。新綁定的第一份快照建立事件起點，重連和換圖重設事件接收與渲染狀態。晚到、重複或不符目前生命／世代的事件不再顯示。M4.4 的 client 與 server 須一併部署以讀取新增的 v4 Schema 欄位，既有 `InputFrame` 與 checkpoint 仍沿用 v4 欄位和累積 ACK。
+
+M4.2 在角色控制器與怪物 FSM 步進後，以同一份 map state 先結算玩家命中，再依 monster ID 結算怪物命中。Swing ID、接受 tick、輸入序號及鎖定朝向留在角色動作。凡在 Return 重置 tick 或之前接受的 swing 都不能命中新 encounter。HP 歸零的怪物保留原 ID 及 encounter，進入停止戰鬥的狀態。這一階段的傷害結果留在 `step` events，兩端仍使用公開 HP 和既有本人動作 checkpoint。按住、衝突或已過期輸入不會在 cooldown 結束時補發攻擊。
+
+M4.3 將 first-hit lock、角色累計傷害、最近傷害 tick 與已使用的 attack IDs 留在 monster encounter。Return 到出生點時銷毀帳本。死亡時帳本轉成唯讀快照，包含當前 `balanceVersion`、各組傷害及 [GAME_DESIGN §6.3](GAME_DESIGN.md#63-death-time-eligibility) 的合格角色。MapRuntime 從當前 seat 提供 connected 狀態、以交接前的凍結排除 transfer 角色，並可注入權威 party membership 查詢。佇列接受的意圖由 world reward worker 持有，完成回呼只提供結果，由下一次固定 tick 接受 receipt。記憶體 port 按 deathId 重用 receipt，提交失敗或確認遺失時保留原意圖重試；房間釋放後已接受的工作仍可完成。未完成意圖達 256 時停止接受新 swings，已接受的 swings 依固定 tick 結算。記憶體 receipt 僅記錄完成，角色 version 集合為空。
+
+M4.4 同一固定 tick 驗證 receipt 的 deathId、monsterId、generation 與 encounterId。確認 tick C 進入 Dead，C + 30 進入 RespawnWait，C + 330 於原 spawn 以新 monsterId、遞增 generation 與新 encounterId 進入 Spawning，下一 tick 進入 Patrol。前一世代接受的 swing 不會命中新世代。房間銷毀只釋放對 receipt 的保留，原工作仍由 world worker 完成。
+
+後續完整獎勵依下列契約交付。
 
 1. Combat applyHit 檢查 monster lifecycle／attackId，寫入 EffectiveDamage 與 first-hit group lock。
-2. 首個 HP≤0 transition 設 `RewardPending`，建立 `deathId = nodeBootId + mapInstanceId + spawnId + generation + encounterId` 的唯一識別（實作可編碼成 UUID／opaque ID），凍結 death-time eligibility／group damage／balanceVersion。
+2. 首個 HP≤0 transition 設 `RewardPending`，以 `(mapInstanceId, spawnId, monsterId, encounterId)` 編碼唯一的 `deathId`（mapInstanceId 已含 nodeBootId，monsterId 識別 generation），凍結 death-time eligibility／group damage／balanceVersion。
 3. Pure reward policy 按 GAME_DESIGN 先分一份 B，再套 party bonus；loot 使用 server-secret deterministic RNG，產生不可變 RewardIntent。
 4. Reward worker 透過 CharacterCoordinator 按 characterId 取得所有 recipient 的 mutation locks；用 **同一 DB transaction** 插入 death record、各 recipient grant、level／EXP／AP 更新、所有 personal ground-loot rolls。
 5. 重複 deathId：讀取原 receipt／rolled data，不重新分配、不再加 EXP。Unique `(deathId, characterId)` 提供第二道保護；只插入新 grant 的 recipients 才能加進度。

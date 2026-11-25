@@ -1,3 +1,6 @@
+export { createSolidPointSweep as createMonsterMovement, createSolidObstructionTest } from '@viesma/physics'
+export type { CombatDamageEvent, CombatStepContext, MonsterDamageEvent } from './combat.js'
+export type { EncounterRewardIntent, MonsterDeathClaim, PartyMembership } from './encounter-rewards.js'
 export { createFixedTickDriver, fixedDeltaSeconds, maxCatchUpTicks, ticksPerSecond } from './fixed-tick.js'
 export type { FixedTick, FixedTickAdvance, FixedTickDriver, MonotonicClock } from './fixed-tick.js'
 export {
@@ -9,13 +12,14 @@ export {
   type LocalPortalEvent,
   type LocalWorldState,
 } from './local-world.js'
+export type { MonsterStepContext } from './monster-ai.js'
 export {
-  createMonsterFixture,
-  stepMonsterFixture,
-  type MonsterFixture,
-  type MonsterFixtureDefinition,
-  type MonsterFixtureEvent,
-} from './monster-fixture.js'
+  spawnMonsters,
+  type MonsterDeathIdentity,
+  type MonsterIds,
+  type MonsterSpawnDefinition,
+  type SimulationMonster,
+} from './monster.js'
 export {
   normalizeMovementInput,
   type LocalMapInputCommand,

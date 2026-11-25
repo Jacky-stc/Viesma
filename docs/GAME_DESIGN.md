@@ -127,13 +127,14 @@ Level-up／AP／換裝使 MaxHP／MaxMP 改變時，只 clamp 現有 HP／MP 到
 
 ### 4.1 Player basic attack
 
-- Cooldown 18 ticks（600ms）；windup 4 ticks、active 1 tick、recovery 9 ticks，總 action 14 ticks。Cooldown 從 server 接受 tick 起算，attack edge 不排隊。
+- Cooldown 18 ticks（600ms）；windup 4 ticks、active 1 tick、recovery 9 ticks，總 action 14 ticks。由 server 在取用有效輸入時接受，於 T + 4 結算、T + 14 結束，T + 18 才可再次接受新邊緣。攻擊控制器不保留未獲接受的邊緣。
 - Active tick 使用 server 當時 player transform，前方 48 × 40 world-unit rectangle；以 player 中心為高度中心，沿 facing 從中心向前延伸。禁止穿過 solid wall 命中；用中心到 target 中心的 obstruction test。
+- M4.2 的怪物命中點位於底部錨點上方 12 world units。命中點在矩形邊界上也算命中。遮擋測試使用兩個戰鬥中心之間的直線，穿入 solid 內部才阻擋，沿邊、擦角或穿過 one-way 不阻擋。
 - 最多命中 3 個不同 monsters，候選依 `monsterId` 排序；同 `attackId + monsterId` 只命中一次。MVP 不做 lag compensation／回溯 client timestamp。
 - `RawDamage = max(1, AttackPower - MonsterDefense)`；server RNG 抽 `0..9999` 與 `CriticalChanceBps` 比較，critical 時 `Damage = floor(RawDamage × 150/100)`，否則為 RawDamage。
 - `EffectiveDamage = min(Damage, HPBeforeHit)` 才可計入 contribution；顯示數字可為 Damage，HP 與 credit 使用 EffectiveDamage。Zero／duplicate／blocked hit 沒有 contribution。
 - 同 tick command 按 `(acceptedTick, characterId, inputSeq)` 決定順序；先結算 player active hits，再 monster active hits。同 tick 先死亡的 monster 不能再攻擊。
-- Server 發送 `attackId`／`damageEventId`／`deathId`；client 可先播放 swing，但命中、damage number、EXP 與 loot 必須等 authority。不得用 client 的 target／damage／位置直接結算。
+- 權威傷害結果包含 `attackId` 與 `encounterId`。M4.3 在同一次 HP 更新納入有效傷害及尾刀，HP 首次歸零時以 `deathId` 凍結各組傷害與合格角色。線上沿用公開 HP。視覺訊息與 EXP／loot 分配在後續階段接入。
 
 ### 4.2 Monster attack 與受傷
 
@@ -154,14 +155,18 @@ Level-up／AP／換裝使 MaxHP／MaxMP 改變時，只 clamp 現有 HP／MP 到
 
 Spawn level `L` 套用：`MaxHP = round(BaseHP × (1 + 0.18×(L-1)))`、`ATK = BaseATK + 2×(L-1)`、`DEF = BaseDEF + floor((L-1)/2)`、`MonsterBaseEXP = BaseEXP × L`。結果在資料載入時計算驗證；round 的 .5 向上，均為正數。初始所有來源皆為整數。
 
-生命週期：`Spawning → Patrol → Aggro/Chase → Attack → Chase`；失去合法 target → `Return → Patrol`；HP 歸零 → `RewardPending → Dead → RespawnWait → Spawning`。
+生命週期：`Spawning → Patrol → Aggro/Chase → Attack → Chase`；失去合法 target → `Return → Patrol`；HP 歸零 → `RewardPending → Dead → RespawnWait → Spawning → Patrol`。
 
 - Spawn point 含 `spawnId`、archetype、level、patrol segment／flight box、floor ID。Ground monster 不跨越平台邊緣、不跳躍；不能到達的目標可 chase 到邊界後 Return，不做通用 pathfinding。
 - 每 6 ticks 更新 target；以最近 alive、無 protection 且仍保留 body 的 player 為目標，包含 reconnect grace 內的 disconnected body，距離相同按 `characterId`。Grace 到期移除 body 才不再是合法 target。Aggro radius 320、lose-target radius 480、spawn leash 512；失去 target 持續 90 ticks 後 Return。
 - Return 不接受 damage、不產生 reward；到 spawn 補滿 HP、清除 contribution／group locks，開始新 `encounterId`。不可帶著過往 credit farm 下一次 encounter。
 - HP 首次歸零以單一 state transition claim death，立即停止 combat；`RewardPending` 等 durable result（MVP-A 為 memory commit），期間不可再命中／respawn。
-- 成功結算後顯示 corpse 30 ticks，接續 respawn wait 300 ticks；重新 spawn 給全新 `monsterId`／generation，原 ID 不重用。DB failure 保持 RewardPending，禁止 client 看到已確認獎勵。
+- 從固定 tick 接受成功 receipt 起顯示 corpse 30 ticks，接續 respawn wait 300 ticks。原出生點以全新 `monsterId`、遞增 generation 與新 `encounterId` 進入 Spawning，下一 tick 進入 Patrol。若結算失敗或尚未確認，保持 RewardPending。
 - Room 空房且沒有 reconnect／incoming reservation 後可釋放；monster 狀態不持久化。重建 room 從新 spawn 開始，不重播未提交 death。
+
+M4.1 使用怪物錨點與角色腳底中心的平方距離判斷範圍，邊界含等號。新目標須在 aggro 半徑內，已追蹤的目標可保留到 lose-target 半徑。新目標若從巡邏區任何位置都無法進入攻擊距離，或已在出生 leash 外，略過該目標。追蹤中的角色離開可達區時，怪物可走到限制位置後進入 Return。怪物在巡邏區內先沿 X 再沿 Y 掃掠，Ground 的 Y 固定在出生樓面，Bat 在出生高度往返巡邏，追逐時可改變高度。
+
+Monster attack cooldown 從前搖開始計算。前搖鎖定角色及該次生命，目標離開房間或失去資格時解除該次鎖定。有效 tick 再確認同房、生命、reach、中心直線遮擋、安全區、出生保護及受傷免疫。M4.2 在怪物 HP 首次歸零時終止其 AI 與命中資格，保留怪物和 encounter ID 供 M4.3 接入 death claim。和 Return 重置同 tick 或更早接受的 swing 對新 encounter 無效。
 
 ## 6. Party
 
@@ -188,7 +193,7 @@ Party credit 在 death 時只有「仍在同 party，且 membershipToken 相同�
 
 ### 6.3 Death-time eligibility
 
-RewardPending transition 時，server 在同一 authority turn 擷取不可變的 reward snapshot。角色須**全部符合**：
+RewardPending transition 時，server 在同一 authority turn 擷取不可變的 reward snapshot，使用玩家命中階段的戰鬥中心與當時連線及組隊資料。角色須**全部符合**：
 
 1. Alive、connected、不是 transfer 中，與 monster 在同一 `mapInstanceId`。
 2. 角色中心距 monster death 中心的 Euclidean distance ≤640 units（比較 squared distance）。

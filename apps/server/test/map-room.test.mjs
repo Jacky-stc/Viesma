@@ -91,6 +91,9 @@ test('shares M1 through the actual room lifecycle and isolates another room', as
   const { room } = first
   expect(second.room.roomId).toBe(room.roomId)
   expect(other.room.roomId).not.toBe(room.roomId)
+  for (const connection of [first, second, other]) {
+    await expect.poll(() => connection.room.state.serverTick).toBe(0)
+  }
   advance()
   await expect.poll(() => room.state.players.size).toBe(2)
   await expect.poll(() => other.room.state.players.size).toBe(1)
@@ -259,7 +262,7 @@ test('input flooding over the transport does not move a player faster than three
   }
 })
 
-test('publishes fixture movement, HP and removal to both sockets and gives late joins a fresh full projection', async () => {
+test('publishes monster identity, movement and HP to both sockets and gives late joins a fresh full projection', async () => {
   const first = observe(await client.create(mapRoomName, version, MapRoomSchema))
   const second = observe(await client.joinById(first.room.roomId, version, MapRoomSchema))
   const other = observe(await client.create(mapRoomName, version, MapRoomSchema))
@@ -267,13 +270,15 @@ test('publishes fixture movement, HP and removal to both sockets and gives late 
   await expect.poll(() => first.room.state.players.size).toBe(2)
   await expect.poll(() => second.room.state.serverTick).toBe(first.room.state.serverTick)
   const read = ({ room }) => readPublicMonsters(room.state)
-  const [one] = read(first)
+  const firstSnapshot = read(first)
+  const one = firstSnapshot.find(({ x, y }) => x === 471 && y === 896)
+  const find = (connection, id = one.monsterId) => read(connection).find(({ monsterId }) => monsterId === id)
   expect(one).toMatchObject({ x: 471, y: 896, hp: 71, state: 'patrol' })
-  expect(read(second)).toEqual([one])
-  await expect.poll(() => read(other)[0]?.x).toBe(471)
-  const [separate] = read(other)
-  expect(separate.monsterId).not.toBe(one.monsterId)
-  const runtime = createRoom.mock.results.find(({ value }) => value.mapInstanceId === first.room.state.mapInstanceId).value
+  expect(firstSnapshot).toHaveLength(10)
+  expect(read(second)).toEqual(firstSnapshot)
+  await expect.poll(() => read(other).find(({ x, y }) => x === 471 && y === 896)).toBeDefined()
+  const separate = read(other).find(({ x, y }) => x === 471 && y === 896)
+  expect(read(other).every(({ monsterId }) => firstSnapshot.every((monster) => monster.monsterId !== monsterId))).toBe(true)
   const otherRuntime = createRoom.mock.results.find(({ value }) => value.mapInstanceId === other.room.state.mapInstanceId).value
 
   const serverRoom = matchMaker.getLocalRoomById(first.room.roomId)
@@ -291,31 +296,19 @@ test('publishes fixture movement, HP and removal to both sockets and gives late 
   await forged.room.leave()
   await expect.poll(() => serverRoom.clients.length).toBe(2)
   advance()
-  await expect.poll(() => read(second)[0]?.x).toBe(477)
-  expect(read(second)[0]).toMatchObject({ monsterId: one.monsterId, hp: 71 })
+  await expect.poll(() => find(second)?.x).toBe(477)
+  expect(find(second)).toMatchObject({ monsterId: one.monsterId, hp: 71 })
 
-  expect(runtime.queueMonsterFixtureEvent('test-hp')).toBe(true)
-  expect(runtime.queueMonsterFixtureEvent('test-hp')).toBe(false)
-  advance()
-  for (const connection of [first, second]) {
-    await expect.poll(() => read(connection)).toEqual([{ ...one, x: 483, hp: 35 }])
-  }
-  expect(read(other)[0]).toMatchObject({ ...separate, x: expect.any(Number) })
+  expect(find(other, separate.monsterId)).toMatchObject({ ...separate, x: expect.any(Number) })
   await second.room.leave()
   advance()
   await expect.poll(() => first.room.state.players.size).toBe(1)
-  expect(read(first)).toEqual([{ ...one, x: 489, hp: 35 }])
+  expect(find(first)).toEqual({ ...one, x: 483 })
   const rejoined = observe(await client.joinById(first.room.roomId, version, MapRoomSchema))
   await expect.poll(() => read(rejoined)).toEqual(read(first))
 
-  expect(runtime.queueMonsterFixtureEvent('remove')).toBe(true)
-  expect(runtime.queueMonsterFixtureEvent('remove')).toBe(false)
-  advance()
-  for (const connection of [first, rejoined]) {
-    await expect.poll(() => read(connection)).toEqual([])
-    expect(connection.room.state.monsters.size).toBe(0)
-  }
-  expect(read(other)[0]).toMatchObject({ monsterId: separate.monsterId, hp: 71 })
+  expect(read(rejoined)).toHaveLength(10)
+  expect(find(other, separate.monsterId)).toMatchObject({ monsterId: separate.monsterId, hp: 71 })
   await Promise.all([first.room.leave(), rejoined.room.leave(), other.room.leave()])
   await expect.poll(() => matchMaker.getLocalRoomById(other.room.roomId)).toBeUndefined()
   expect(otherRuntime.snapshot().monsters).toEqual([])

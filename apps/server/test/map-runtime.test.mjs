@@ -3,6 +3,7 @@ import { PROTOCOL_VERSION } from '@viesma/protocol'
 import { fixedDeltaSeconds } from '@viesma/simulation'
 import { expect, test, vi } from 'vitest'
 import { createMapRuntime } from '../src/runtime/map-runtime.ts'
+import { getMonsterSpawnDefinitions } from '../src/runtime/monster-spawns.ts'
 import { createWorldCoordinator } from '../src/runtime/world-coordinator.ts'
 
 const gameData = loadGrayboxGameData()
@@ -53,6 +54,41 @@ function frame(binding, seq, movement = {}) {
     ...movement,
   }
 }
+
+test('rejects forged combat fields and stale epochs before consuming an attack edge or updating ACK', () => {
+  const { world, wake } = harness()
+  const room = world.createRoom()
+  const connection = {}
+  const binding = room.join(connection, 0)
+  wake(34)
+  const attack = frame(binding, 1, { moveX: 0, attackPressed: true })
+  for (const extra of [
+    { attackPressed: 1 },
+    { damage: 999 },
+    { hp: 0 },
+    { target: { x: 500, y: 890 } },
+    { attackId: 'forged' },
+    { hitResult: { effectiveDamage: 71 } },
+    { contribution: 71 },
+    { partyMembership: { partyId: 'forged', membershipToken: 'forged' } },
+    { winningGroup: 'solo:forged' },
+    { deathId: 'forged' },
+    { rewardEligibility: ['forged'] },
+    { rewardReceipt: { deathId: 'forged' } },
+    { connectionEpoch: 'stale' },
+    { mapEpoch: 1 },
+  ]) {
+    expect(room.receive(connection, { ...attack, ...extra }, 34)).toBe(false)
+  }
+  wake(68)
+  expect(room.checkpoint(connection)).toMatchObject({ ackInputSeq: null, controller: { action: { kind: 'none' } } })
+  expect(room.receive(connection, attack, 68)).toBe(true)
+  expect(room.receive(connection, attack, 68)).toBe(false)
+  wake(102)
+  expect(room.checkpoint(connection).ackInputSeq).toBe(1)
+  expect(room.checkpoint(connection).controller.action).toEqual({ kind: 'attack', facing: 'right' })
+  expect(room.player(binding.characterId).action.swing).toMatchObject({ attackId: expect.any(String), acceptedTick: 3, inputSeq: 1 })
+})
 
 test('runs one shared 30 Hz driver, bounds catch-up and stops with the last room', () => {
   const { world, schedule, stop, onBacklog, onBacklogRecovered, wake } = harness()
@@ -391,44 +427,69 @@ test('flushes queued input when the authority enters Death and rejects late fram
   expect(room.checkpoint(connection).ackInputSeq).toBe(2)
 })
 
-test('projects the room-owned fixture as detached values and clears only the disposed instance', () => {
+test('projects room-owned monsters as detached values and clears only the disposed instance', () => {
   const { world, wake } = harness()
   const one = world.createRoom()
   const other = world.createRoom()
-  const first = one.snapshot().monsters[0]
-  const second = other.snapshot().monsters[0]
-  expect(first).toMatchObject({ archetypeId: 'slime', x: 465, y: 896, state: 'patrol', hp: 71, maxHp: 71 })
+  const ids = one.snapshot().monsters.map(({ monsterId }) => monsterId)
+  expect(ids).toHaveLength(10)
+  expect(ids).toEqual([...ids].sort())
+  const findAtSpawn = (room) => room.snapshot().monsters.find(({ x, y }) => x === 465 && y === 896)
+  const first = findAtSpawn(one)
+  const second = findAtSpawn(other)
+  const read = (room, id) => room.snapshot().monsters.find(({ monsterId }) => monsterId === id)
+  expect(first).toMatchObject({ archetypeId: 'slime', x: 465, y: 896, state: 'spawning', generation: 1, hp: 71, maxHp: 71 })
   expect(second).toEqual({ ...first, monsterId: second.monsterId })
   expect(second.monsterId).not.toBe(first.monsterId)
 
   const player = {}
   const binding = one.join(player, 0)
   expect(one.receive(player, frame(binding, 0, { monsterId: first.monsterId, hp: 0, x: 0 }), 0)).toBe(false)
-  expect(one.queueMonsterFixtureEvent('test-hp')).toBe(true)
-  expect(one.queueMonsterFixtureEvent('test-hp')).toBe(false)
-  expect(one.snapshot().monsters[0]).toEqual(first)
+  expect(read(one, first.monsterId)).toEqual(first)
   first.x = -10000
   wake(100)
-  expect(one.snapshot().monsters[0]).toMatchObject({ monsterId: first.monsterId, x: 471, hp: 35 })
-  expect(other.snapshot().monsters[0]).toMatchObject({ monsterId: second.monsterId, x: 471, hp: 71 })
-  expect(one.queueMonsterFixtureEvent('test-hp')).toBe(false)
+  expect(read(one, first.monsterId)).toMatchObject({ x: 471, hp: 71 })
+  expect(read(other, second.monsterId)).toMatchObject({ x: 471, hp: 71 })
 
   one.leave(player)
   wake(200)
-  expect(one.snapshot()).toMatchObject({ players: [], monsters: [{ monsterId: first.monsterId, x: 477, hp: 35 }] })
-  expect(one.queueMonsterFixtureEvent('remove')).toBe(true)
-  expect(one.queueMonsterFixtureEvent('remove')).toBe(false)
-  wake(300)
-  expect(one.snapshot().monsters).toEqual([])
-  expect(one.queueMonsterFixtureEvent('remove')).toBe(false)
+  expect(one.snapshot().players).toEqual([])
+  expect(read(one, first.monsterId)).toMatchObject({ x: 477, hp: 71 })
+  expect(one.snapshot().monsters).toHaveLength(10)
   world.disposeRoom(one)
 
   world.disposeRoom(other)
   expect(other.snapshot().monsters).toEqual([])
   const fresh = world.createRoom()
-  expect(fresh.snapshot().monsters[0]).toMatchObject({ x: 465, hp: 71 })
-  expect(fresh.snapshot().monsters[0].monsterId).not.toBe(second.monsterId)
+  expect(findAtSpawn(fresh)).toMatchObject({ x: 465, hp: 71 })
+  expect(findAtSpawn(fresh).monsterId).not.toBe(second.monsterId)
   world.disposeRoom(fresh)
+})
+
+test('initializes from validated data once, caps active spawns and projects stable ID order', () => {
+  const definitions = getMonsterSpawnDefinitions(gameData, m1)
+  const m2 = gameData.tiledMaps.find(({ id }) => id === 'm2')
+  expect(getMonsterSpawnDefinitions(gameData, m2).filter(({ movement }) => movement === 'flight')).toEqual([
+    expect.objectContaining({ archetypeId: 'bat', maxHp: 104, patrolSpeed: 90, chaseSpeed: 130, attackReach: 40 }),
+    expect.objectContaining({ archetypeId: 'bat', maxHp: 104, patrolSpeed: 90, chaseSpeed: 130, attackReach: 40 }),
+  ])
+  let next = 0
+  const room = createMapRuntime('room', m1, m1.spawns[0], 'hash', 0, () => `id-${++next}`, {
+    definitions: definitions.toReversed(),
+    maxActive: 3,
+  })
+  const initial = room.snapshot().monsters
+  const expectedIds = initial.map(({ monsterId }) => monsterId)
+  expect(initial).toHaveLength(3)
+  expect(expectedIds).toEqual([...expectedIds].sort())
+  expect(initial.every(({ archetypeId, hp }) => archetypeId === 'mushroom' && hp === 139)).toBe(true)
+  expect(initial.map(({ x }) => x).sort((a, b) => a - b)).toEqual([2055, 3020, 3390])
+  room.advance({ tick: 1, dtSeconds: fixedDeltaSeconds }, 1000 / 30)
+  expect(room.snapshot().players).toEqual([])
+  expect(room.snapshot().monsters.map(({ monsterId }) => monsterId)).toEqual(expectedIds)
+  expect(room.snapshot().monsters.map(({ x }) => x)).not.toEqual(initial.map(({ x }) => x))
+  room.dispose()
+  expect(room.snapshot().monsters).toEqual([])
 })
 
 test('replays the same multi-actor trace with regular and delayed clock wakes', () => {

@@ -7,7 +7,7 @@ import {
   type NonNegativeSafeInteger,
   type SimulationTick,
 } from '@viesma/domain'
-import { initialPlayerLifecycleBalance, type SpawnId } from '@viesma/game-data'
+import { initialPhysicsBalance, initialPlayerLifecycleBalance, type SpawnId } from '@viesma/game-data'
 import { neutralMovement, placePlayerAtSpawn, type FacingDirection, type SimulationPlayer } from './player.js'
 import type { SafeHubSpawn } from './safe-hub.js'
 
@@ -35,6 +35,10 @@ export type PlayerLifecycleEvent = PlayerLifecycleEventFields &
   )
 
 const balance = initialPlayerLifecycleBalance
+
+export function playerHurtAction(ticksRemaining = initialPhysicsBalance.hurtTicks) {
+  return { kind: 'hurt', ticksRemaining } as const
+}
 
 export function selectPlayerVitalEffects(
   effects: readonly PlayerVitalEffect[],
@@ -80,7 +84,7 @@ export function selectPlayerVitalEffects(
 
 export function applyPlayerVitalEffects(
   player: SimulationPlayer,
-  effects: readonly PlayerVitalEffect[],
+  effects: readonly { readonly kind: PlayerVitalEffect['kind']; readonly amount: number }[],
   tick: SimulationTick
 ): SimulationPlayer {
   const { maxHp, maxMp } = player.vitals
@@ -160,6 +164,7 @@ export function respawnPlayer(
       vitals: { ...player.vitals, hp: player.vitals.maxHp, mp: player.vitals.maxMp },
       lifeStartedTick: tick,
       lastHurtTick: null,
+      lastAttackStartedTick: null,
       spawnProtected: true,
       spawnProtectionStartedTick: tick,
     },

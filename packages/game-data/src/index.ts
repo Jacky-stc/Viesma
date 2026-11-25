@@ -1,9 +1,12 @@
-export { monsterMaxHpAtLevel } from './definitions.js'
+export { monsterAttackAtLevel, monsterDefenseAtLevel, monsterMaxHpAtLevel } from './definitions.js'
+export { initialEncounterRewardBalance } from './encounter-rewards.js'
 export { createInitialGameDataSource } from './fixture.js'
 export { loadGrayboxGameData } from './graybox.js'
 export type { GuideDefinition } from './guide.js'
 export { initialPhysicsBalance, loadPlayerMovementBalance, type PlayerMovementBalance } from './initial-physics.js'
 export { loadGameData } from './load.js'
+export { initialMonsterAiBalance, loadMonsterAiBalance } from './monster-ai.js'
+export { getBeginnerCombatStats, initialPlayerAttackBalance, maxBasisPoints, type PlayerCombatStats } from './player-combat.js'
 export {
   initialPlayerLifecycleBalance,
   loadPlayerLifecycleBalance,

@@ -1,16 +1,9 @@
 import type { WorldPoint } from '@viesma/domain'
 import { initialPhysicsBalance, type NormalizedMap } from '@viesma/game-data'
+import { segmentIntersectsInterior } from '@viesma/physics'
 
 export const hardCorrectionWorldUnits = 64
 const correctionMilliseconds = 100
-
-function axisInterval(start: number, end: number, min: number, max: number): readonly [number, number] | undefined {
-  const distance = end - start
-  if (distance === 0) return start > min && start < max ? [-Infinity, Infinity] : undefined
-  const enter = (min - start) / distance
-  const exit = (max - start) / distance
-  return [Math.min(enter, exit), Math.max(enter, exit)]
-}
 
 /** 以角色 AABB 擴張 solid 後，檢查整段畫面校正路徑。碰到邊緣仍可沿面移動。 */
 export function correctionPathIsClear(map: NormalizedMap, from: WorldPoint, to: WorldPoint): boolean {
@@ -20,9 +13,7 @@ export function correctionPathIsClear(map: NormalizedMap, from: WorldPoint, to: 
   return !map.colliders.some(({ kind, bounds }) => {
     if (kind !== 'solid') return false
     const { x, y } = bounds.origin
-    const horizontal = axisInterval(from.x, to.x, x - width, x + bounds.width)
-    const vertical = axisInterval(from.y, to.y, y - height, y + bounds.height)
-    return horizontal && vertical && Math.max(0, horizontal[0], vertical[0]) < Math.min(1, horizontal[1], vertical[1])
+    return segmentIntersectsInterior(from, to, { left: x - width, top: y - height, right: x + bounds.width, bottom: y + bounds.height })
   })
 }
 

@@ -1,6 +1,7 @@
 import { stackableItemLimit } from './definitions.js'
 import { initialBalanceVersion } from './initial-physics.js'
 import { requiredExp } from './load.js'
+import { starterWeaponId } from './player-combat.js'
 import { GAME_DATA_SCHEMA_VERSION, type GameDataSource } from './types.js'
 
 const levelCap = 25
@@ -149,7 +150,7 @@ function equipmentFixture() {
   const items: ItemSource[] = []
   const equipmentTiers = equipmentTierLevels.map((level, index) => {
     const itemsBySlot = {
-      weapon: level === 1 ? 'training_sword' : `sword_tier_${level}`,
+      weapon: level === 1 ? starterWeaponId : `sword_tier_${level}`,
       armor: `armor_tier_${level}`,
       accessory: `accessory_tier_${level}`,
     }

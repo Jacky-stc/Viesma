@@ -1,5 +1,9 @@
 import { toSimulationTick, type AttackId, type CharacterId, type MapState, type SimulationTick } from '@viesma/domain'
+import { basicAttackEnded, canStartBasicAttack, resolveCombat, type CombatDamageEvent, type CombatStepContext } from './combat.js'
+import type { MonsterDeathClaimedEvent } from './encounter-rewards.js'
 import { fixedDeltaSeconds } from './fixed-tick.js'
+import { advanceMonsters, type MonsterStepContext } from './monster-ai.js'
+import type { SimulationMonster } from './monster.js'
 import { selectInputCommands, type PlayerInputCommand, type SelectedInput } from './movement-input.js'
 import type { PlayerController } from './player-controller.js'
 import {
@@ -16,11 +20,14 @@ import { resolveSafeHubSpawn, type SafeHubSpawn } from './safe-hub.js'
 
 export interface SimulationState {
   readonly tick: SimulationTick
-  readonly map: Omit<MapState, 'players'> & { readonly players: readonly SimulationPlayer[] }
+  readonly map: Omit<MapState, 'players' | 'monsters'> & {
+    readonly players: readonly SimulationPlayer[]
+    readonly monsters: readonly SimulationMonster[]
+  }
 }
 
 export type SimulationCommand = PlayerInputCommand
-export type SimulationEvent = PlayerLifecycleEvent
+export type SimulationEvent = PlayerLifecycleEvent | CombatDamageEvent | MonsterDeathClaimedEvent
 
 export interface SimulationIdSource {
   nextAttackId(): AttackId
@@ -34,6 +41,8 @@ export interface SimulationContext {
   readonly playerActionEvents?: readonly PlayerActionEvent[]
   readonly playerVitalEffects?: readonly PlayerVitalEffect[]
   readonly playerRespawn?: SafeHubSpawn
+  readonly monsters?: MonsterStepContext
+  readonly combat?: CombatStepContext
 }
 
 export interface SimulationStepResult {
@@ -60,9 +69,27 @@ export function stepWithSelectedInputs(
   if (dtSeconds !== fixedDeltaSeconds || context.tick !== toSimulationTick(state.tick + 1)) {
     throw new RangeError('Simulation step requires one fixed delta and the next tick')
   }
-  if (state.map.players.length === 0) {
-    return { state: { ...state, tick: context.tick }, events: [] }
-  }
+  const events: SimulationEvent[] = []
+  const { tick, rng } = context
+  const { mapInstanceId, mapId } = state.map
+  const combat = mapId === 'village' ? undefined : context.combat
+  const advancedPlayers = advancePlayers(state, inputs, context, combat, events)
+  const advancedMonsters = advanceMonsters(state.map.monsters, advancedPlayers, tick, context.monsters, rng)
+  const { players, monsters } = combat
+    ? resolveCombat(advancedPlayers, advancedMonsters, { tick, mapId, mapInstanceId }, combat, rng, events)
+    : { players: advancedPlayers, monsters: advancedMonsters }
+  const map = players === state.map.players && monsters === state.map.monsters ? state.map : { ...state.map, players, monsters }
+  return { state: { ...state, tick: context.tick, map }, events }
+}
+
+function advancePlayers(
+  state: SimulationState,
+  inputs: ReadonlyMap<CharacterId, SelectedInput>,
+  context: SimulationContext,
+  combat: CombatStepContext | undefined,
+  events: SimulationEvent[]
+): readonly SimulationPlayer[] {
+  if (state.map.players.length === 0) return state.map.players
   const controller = context.playerController
   if (controller === undefined) throw new RangeError('Simulation step requires a player controller for maps with players')
 
@@ -87,10 +114,10 @@ export function stepWithSelectedInputs(
 
   const { tick } = context
   const { mapInstanceId } = state.map
-  const events: SimulationEvent[] = []
-  const players = [...state.map.players]
+  return [...state.map.players]
     .sort((left, right) => (left.characterId < right.characterId ? -1 : Number(left.characterId > right.characterId)))
     .map((player) => {
+      if (player.lifeStartedTick === tick) return player
       if (player.action.kind === 'death') {
         const respawn = spawn && respawnPlayer(player, tick, mapInstanceId, spawn)
         if (!respawn) return player
@@ -98,19 +125,40 @@ export function stepWithSelectedInputs(
         return respawn.player
       }
 
-      const input = inputs.get(player.characterId)
+      const selected = inputs.get(player.characterId)
+      const input = selected?.conflict ? undefined : selected?.command
       const updated = applyPlayerVitalEffects(player, vitalEffects.get(player.characterId) ?? [], tick)
-      const advanced =
-        updated.vitals.hp === 0
-          ? updated
-          : controller(updated, input?.conflict ? undefined : input?.command, actionEvents.get(player.characterId), tick)
+      const attackInput = combat && combat.admitAttacks !== false && canStartBasicAttack(updated, input, tick) ? input : undefined
+      const actionKinds = combat
+        ? attackInput
+          ? startAttack
+          : basicAttackEnded(updated, tick)
+            ? endAttack
+            : undefined
+        : actionEvents.get(player.characterId)
+      const advanced = updated.vitals.hp === 0 ? updated : controller(updated, input, actionKinds, tick)
       if (advanced.vitals.hp === 0 || advanced.physics.inVoid) {
         const death = enterPlayerDeath(advanced, tick, mapInstanceId, advanced.vitals.hp === 0 ? 'damage' : 'void')
         events.push(death.event)
         return death.player
       }
-      if (advanced.spawnProtected && advanced.action.kind === 'attack') return { ...advanced, spawnProtected: false }
+      if (advanced.action.kind === 'attack') {
+        if (attackInput && !advanced.action.swing) {
+          return {
+            ...advanced,
+            spawnProtected: false,
+            lastAttackStartedTick: tick,
+            action: {
+              ...advanced.action,
+              swing: { attackId: context.ids.nextAttackId(), acceptedTick: tick, inputSeq: attackInput.seq },
+            },
+          }
+        }
+        if (advanced.spawnProtected) return { ...advanced, spawnProtected: false }
+      }
       return advanced
     })
-  return { state: { ...state, tick, map: { ...state.map, players } }, events }
 }
+
+const startAttack = new Set<PlayerActionEvent['kind']>(['attackStarted'])
+const endAttack = new Set<PlayerActionEvent['kind']>(['attackEnded'])

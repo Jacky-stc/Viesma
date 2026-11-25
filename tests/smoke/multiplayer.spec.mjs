@@ -6,6 +6,12 @@ import { clearTimeout, setTimeout } from 'node:timers'
 import { URL } from 'node:url'
 import { joinSmokePeer, startBrowserFixtureServer } from '../../apps/server/test/browser-fixture-server.mjs'
 
+function monsterProjection(page) {
+  return page
+    .locator('.playground-canvas')
+    .evaluate(({ dataset }) => ({ tick: Number(dataset.remoteSnapshotTick), monsters: JSON.parse(dataset.sharedMonsters ?? '[]') }))
+}
+
 async function routeFixtureRoom(page, fixture) {
   let seat
   await page.route('**/multiplayer/matchmake/joinOrCreate/map', async (route) => {
@@ -65,19 +71,23 @@ function percentile(samples, fraction) {
   return Number(sorted[Math.ceil(sorted.length * fraction) - 1].toFixed(2))
 }
 
-async function gateInputFrames(page, fixtureAddress) {
+async function gateInputFrames(page, fixtureAddress, duplicateDamage = false) {
   const messageName = Buffer.from('InputFrame')
+  const damageMessage = Buffer.from('CombatDamage')
   let blocked = false
   let dropped = 0
   let forwarded = 0
+  let duplicated = 0
   let closed = false
   let jitter = false
   let incoming = 0
   let delayedBatches = 0
+  let upstream
   await page.routeWebSocket(
     ({ host }) => host === fixtureAddress,
     (socket) => {
       const server = socket.connectToServer()
+      upstream = server
       const pending = []
       let delivery
       function clearDelivery() {
@@ -104,7 +114,13 @@ async function gateInputFrames(page, fixtureAddress) {
             pending.length = 0
             delivery = undefined
           }, 45)
-        } else socket.send(message)
+        } else {
+          socket.send(message)
+          if (duplicateDamage && Buffer.isBuffer(message) && message.includes(damageMessage)) {
+            duplicated++
+            socket.send(message)
+          }
+        }
       })
       socket.onMessage((message) => {
         if (Buffer.isBuffer(message) && message.includes(messageName)) {
@@ -119,7 +135,9 @@ async function gateInputFrames(page, fixtureAddress) {
     }
   )
   return {
+    send: (message) => upstream.send(message),
     dropped: () => dropped,
+    duplicated: () => duplicated,
     closed: () => closed,
     delayedBatches: () => delayedBatches,
     jitter(enabled) {
@@ -134,6 +152,232 @@ async function gateInputFrames(page, fixtureAddress) {
     },
   }
 }
+
+test('rejects forged damage and gives a fresh second browser the current melee HP', async ({ page, browser, baseURL }) => {
+  const observer = await browser.newPage({ baseURL })
+  const fixture = await startBrowserFixtureServer({ combatScenario: true })
+  const errors = []
+  const canvas = (client) => client.getByRole('img', { name: 'Beginner 平台場景' })
+  const scene = (client) => client.locator('.playground-canvas')
+  try {
+    const attackerSeat = await routeFixtureRoom(page, fixture)
+    const network = await gateInputFrames(page, fixture.address)
+    const observerSeat = await routeFixtureRoom(observer, fixture)
+    for (const client of [page, observer]) client.on('pageerror', (error) => errors.push(error.message))
+    await page.goto('/?multiplayerDiagnostics=1')
+    await page.getByLabel('場景模式').selectOption('multiplayer')
+    await expect(page.getByLabel('目前地圖')).toHaveText('Forest Entrance')
+    const initial = (await monsterProjection(page)).monsters
+    const slime = initial.find(({ x, y }) => x >= 464 && x <= 466 && y === 896)
+    const hp = async (client) => (await monsterProjection(client)).monsters.find(({ monsterId }) => monsterId === slime.monsterId)?.hp
+    expect(slime).toMatchObject({ archetypeId: 'slime', hp: 71 })
+
+    network.block()
+    const forged = fixture.malformedAttack(attackerSeat())
+    network.send(forged.bytes)
+    await expect.poll(forged.received).toBe(true)
+    const { tick } = await monsterProjection(page)
+    await expect.poll(async () => (await monsterProjection(page)).tick).toBeGreaterThanOrEqual(tick + 6)
+    expect(await hp(page)).toBe(71)
+
+    network.unblock()
+    await page.getByRole('region', { name: '平台測試場' }).focus()
+    await page.keyboard.press('KeyJ')
+    await expect.poll(() => hp(page)).toBe(51)
+    await observer.goto('/?multiplayerDiagnostics=1')
+    await observer.getByLabel('場景模式').selectOption('multiplayer')
+    await expect(observer.getByLabel('目前地圖')).toHaveText('Forest Entrance')
+    for (const client of [page, observer]) await expect(client.getByLabel('同房角色數')).toHaveText('同房 2 人')
+    expect(observerSeat().roomId).toBe(attackerSeat().roomId)
+    await expect.poll(() => hp(observer)).toBe(51)
+    await expect(scene(observer)).toHaveAttribute('data-combat-damage-seen', '0')
+    await expect(scene(observer)).toHaveAttribute('data-combat-damage-sprites', '')
+
+    expect(fixture.approachSlime(attackerSeat())).toBe(true)
+    await expect(scene(page)).toHaveAttribute('data-local-authority-x', '435')
+    await expect(page.getByLabel('Beginner 狀態')).toContainText('HP 43 / 50')
+    await expect(observer.getByLabel('Beginner 狀態')).toContainText('HP 50 / 50')
+    await Promise.all(
+      [page, observer].map((client) => expect(scene(client)).toHaveAttribute('data-combat-damage-labels', /(^|,)\d+:7(,|$)/))
+    )
+
+    for (const client of [page, observer]) {
+      await expect(canvas(client)).toHaveCount(1)
+      await expect(scene(client)).toHaveAttribute('data-monster-sprites', initial.map(({ monsterId }) => monsterId).join(','))
+      await expect(scene(client)).toHaveAttribute('data-peer-sprites', '1')
+    }
+    expect(await Promise.all([hp(page), hp(observer)])).toEqual([51, 51])
+    expect(errors).toEqual([])
+  } finally {
+    await observer.close()
+    await fixture.close()
+  }
+})
+
+test('two browsers share combat feedback, confirmed corpse and a new monster generation before one Village recovery', async ({
+  page,
+  browser,
+  baseURL,
+}) => {
+  const viewport = { width: 800, height: 450 }
+  await page.setViewportSize(viewport)
+  const other = await browser.newPage({ baseURL, viewport })
+  const rewards = []
+  const confirmation = Promise.withResolvers()
+  const fixture = await startBrowserFixtureServer({
+    combatScenario: true,
+    beforeReward: () => confirmation.promise,
+    observeReward(intent, receipt) {
+      rewards.push({ intent, receipt })
+    },
+  })
+  const clients = [page, other]
+  const errors = []
+  const scene = (client) => client.locator('.playground-canvas')
+  const canvas = (client) => client.getByRole('img', { name: 'Beginner 平台場景' })
+  try {
+    const attackerSeat = await routeFixtureRoom(page, fixture)
+    const observerSeat = await routeFixtureRoom(other, fixture)
+    const villageSeat = await routeFixtureTravel(page, fixture)
+    const rebound = await routeFixtureTravel(other, fixture)
+    const networks = await Promise.all(clients.map((client) => gateInputFrames(client, fixture.address, true)))
+    for (const client of clients) {
+      client.on('pageerror', (error) => errors.push(error.message))
+      await client.goto('/?multiplayerDiagnostics=1')
+      await client.getByLabel('場景模式').selectOption('multiplayer')
+      await expect(client.getByLabel('目前地圖')).toHaveText('Forest Entrance')
+      await client.getByRole('region', { name: '平台測試場' }).focus()
+    }
+    for (const client of clients) await expect(client.getByLabel('同房角色數')).toHaveText('同房 2 人')
+    for (const client of clients) {
+      await scene(client).evaluate((element) => {
+        const { MutationObserver } = globalThis
+        globalThis.combatRenderedLabels = new Map()
+        new MutationObserver(() => {
+          for (const label of (element.dataset.combatDamageLabels ?? '').split(',')) {
+            const [id, amount] = label.split(':')
+            if (id) globalThis.combatRenderedLabels.set(id, amount)
+          }
+        }).observe(element, { attributes: true, attributeFilter: ['data-combat-damage-labels'] })
+      })
+    }
+    await canvas(page).evaluate((element) => {
+      globalThis.combatCanvas = element
+    })
+    const attackerId = await scene(page).getAttribute('data-multiplayer-character-id')
+    const observerId = await scene(other).getAttribute('data-multiplayer-character-id')
+    const initial = (await monsterProjection(page)).monsters
+    const { monsterId } = initial.find(({ x, y }) => x >= 464 && x <= 466 && y === 896)
+    const readOld = async (client) => (await monsterProjection(client)).monsters.find((monster) => monster.monsterId === monsterId)
+    const authorityHp = () => fixture.monsterHp(attackerSeat(), monsterId)
+    const initialHp = 71
+    for (const client of clients) await expect.poll(() => readOld(client)).toMatchObject({ hp: initialHp, generation: 1 })
+    let swings = 0
+    let hp = initialHp
+    while (swings < 4 && hp > 0) {
+      await clients[swings % clients.length].keyboard.press('KeyJ')
+      swings++
+      await expect.poll(() => authorityHp() ?? initialHp).toBeLessThan(hp)
+      const damage = hp - authorityHp()
+      hp = authorityHp()
+      await Promise.all(
+        clients.map(async (client) => {
+          await expect
+            .poll(() =>
+              scene(client).evaluate(
+                (element, { monsterId, swingId }) => {
+                  const monster = JSON.parse(element.dataset.sharedMonsters ?? '[]').find((value) => value.monsterId === monsterId)
+                  return {
+                    hp: monster?.hp,
+                    state: monster?.state,
+                    seen: Number(element.dataset.combatDamageSeen),
+                    label: globalThis.combatRenderedLabels.get(swingId),
+                  }
+                },
+                { monsterId, swingId: String(swings) }
+              )
+            )
+            .toEqual({ hp, state: hp === 0 ? 'rewardPending' : 'patrol', seen: swings, label: String(damage) })
+        })
+      )
+      if (hp > 0) fixture.advanceWorldTicks(18)
+    }
+    expect(hp).toBe(0)
+    expect(networks.map((network) => network.duplicated())).toEqual([swings, swings])
+    expect(rewards).toEqual([])
+    expect(fixture.drop(observerSeat())).toBe(true)
+    await expect.poll(() => rebound()?.roomId).toBe(observerSeat().roomId)
+    await expect(scene(other)).toHaveAttribute('data-multiplayer-scene-revision', '2')
+    await expect(scene(other)).toHaveAttribute('data-multiplayer-character-id', observerId)
+    await expect.poll(() => readOld(other)).toMatchObject({ hp: 0, state: 'rewardPending', generation: 1 })
+    await expect(scene(other)).toHaveAttribute('data-combat-damage-seen', '0')
+    await expect(scene(other)).toHaveAttribute('data-combat-damage-sprites', '')
+
+    confirmation.resolve()
+    const initialSprites = initial.map(({ monsterId }) => monsterId).join(',')
+    const remainingIds = initial.filter((monster) => monster.monsterId !== monsterId).map(({ monsterId }) => monsterId)
+    await Promise.all(
+      clients.map(async (client) => {
+        await expect.poll(() => readOld(client)).toMatchObject({ hp: 0, state: 'dead', generation: 1 })
+        await expect(scene(client)).toHaveAttribute('data-monster-sprites', initialSprites)
+      })
+    )
+    expect(rewards).toHaveLength(1)
+    const [{ intent, receipt }] = rewards
+    expect(intent.claim).toMatchObject({ monsterId, generation: 1 })
+    expect(receipt).toMatchObject({ deathId: intent.claim.deathId, encounterId: intent.claim.encounterId })
+    expect(intent.groups).toHaveLength(2)
+    expect(intent.groups.reduce((total, { effectiveDamage }) => total + effectiveDamage, 0)).toBe(initialHp)
+    await Promise.all(
+      clients.map(async (client) => {
+        await expect.poll(() => readOld(client)).toMatchObject({ hp: 0, state: 'respawnWait' })
+        await expect(scene(client)).toHaveAttribute('data-monster-sprites', remainingIds.join(','))
+      })
+    )
+    expect(fixture.advanceWorldTicks(300)).toBeGreaterThanOrEqual(300)
+    const readNew = async (client) => (await monsterProjection(client)).monsters.find(({ generation }) => generation === 2)
+    await expect.poll(() => readNew(page)).toMatchObject({ generation: 2, hp: initialHp })
+    const { monsterId: nextId } = await readNew(page)
+    expect(nextId).not.toBe(monsterId)
+    await Promise.all(
+      clients.map(async (client) => {
+        await expect.poll(() => readNew(client)).toMatchObject({ monsterId: nextId, generation: 2, hp: initialHp })
+        expect(await readOld(client)).toBeUndefined()
+        await expect
+          .poll(() => scene(client).evaluate(({ dataset }) => (dataset.monsterSprites ?? '').split(',').sort()))
+          .toEqual([...remainingIds, nextId].sort())
+        await expect(scene(client)).toHaveAttribute('data-combat-damage-sprites', '')
+        await expect(canvas(client)).toHaveCount(1)
+      })
+    )
+    await expect(scene(other)).toHaveAttribute('data-combat-damage-seen', '0')
+    await expect(scene(page)).toHaveAttribute('data-combat-damage-seen', String(swings))
+
+    expect(fixture.approachSlime(attackerSeat(), 7)).toBe(true)
+    const hud = page.getByLabel('Beginner 狀態')
+    await expect(hud).toContainText('已倒下，等待返回 Village')
+    await expect(hud).toContainText('HP 0 / 50')
+    fixture.advanceWorldTicks(90)
+    await expect(page.getByLabel('目前地圖')).toHaveText('Village')
+    await expect(hud).toContainText('HP 50 / 50')
+    await expect(hud).toContainText('重生保護')
+    await expect(scene(page)).toHaveAttribute('data-multiplayer-map-epoch', '1')
+    await expect(scene(page)).toHaveAttribute('data-multiplayer-character-id', attackerId)
+    await expect(scene(page)).toHaveAttribute('data-combat-damage-seen', '0')
+    await expect(scene(page)).toHaveAttribute('data-combat-damage-sprites', '')
+    await expect(scene(page)).toHaveAttribute('data-monster-sprites', '')
+    expect(fixture.players(attackerSeat())).toEqual([observerId])
+    expect(fixture.players(villageSeat())).toEqual([attackerId])
+    expect(await canvas(page).evaluate((element) => element === globalThis.combatCanvas)).toBe(true)
+    await expect(canvas(page)).toHaveCount(1)
+    expect(rewards).toHaveLength(1)
+    expect(errors).toEqual([])
+  } finally {
+    confirmation.resolve()
+    await other.close()
+    await fixture.close()
+  }
+})
 
 test('plays multiplayer by default without diagnostic DOM writes during patches or cleanup', async ({ page, baseURL }) => {
   const diagnosticAttributes = [
@@ -279,23 +523,19 @@ test('two M1 browsers predict keyboard and touch before delivery and reconcile a
   }
 })
 
-test('interpolates under patch jitter and synchronizes the shared monster through rejoin, HP and removal', async ({
-  page,
-  browser,
-  baseURL,
-}) => {
+test('interpolates under patch jitter and shares M1 monsters through rejoin and reconnect', async ({ page, browser, baseURL }) => {
   test.slow()
   const mover = await browser.newPage({ baseURL })
   const fixture = await startBrowserFixtureServer()
   const errors = []
   const scene = (client) => client.locator('.playground-canvas')
   const canvas = (client) => client.getByRole('img', { name: 'Beginner 平台場景' })
-  const projection = (client) =>
-    scene(client).evaluate(({ dataset }) => ({ tick: Number(dataset.remoteSnapshotTick), monsters: JSON.parse(dataset.sharedMonsters) }))
   try {
     const network = await gateInputFrames(page, fixture.address)
+    await routeFixtureRoom(page, fixture)
+    const moverSeat = await routeFixtureRoom(mover, fixture)
+    const recoveredSeat = await routeFixtureTravel(mover, fixture)
     for (const client of [page, mover]) {
-      await routeFixtureRoom(client, fixture)
       client.on('pageerror', (error) => errors.push(error.message))
       await client.goto('/?multiplayerDiagnostics=1')
     }
@@ -306,9 +546,16 @@ test('interpolates under patch jitter and synchronizes the shared monster throug
     }
     await expect(page.getByLabel('同房角色數')).toHaveText('同房 2 人')
     await expect(mover.getByLabel('同房角色數')).toHaveText('同房 2 人')
-    const [slime] = (await projection(page)).monsters
+    const initial = (await monsterProjection(page)).monsters
+    const ids = initial.map(({ monsterId }) => monsterId)
+    const sprites = ids.join(',')
+    const readIds = async (client) => (await monsterProjection(client)).monsters.map(({ monsterId }) => monsterId)
+    const readSlime = async (client) => (await monsterProjection(client)).monsters.find(({ monsterId }) => monsterId === slime.monsterId)
+    const slime = initial.find(({ archetypeId, x, y }) => archetypeId === 'slime' && x >= 417 && x <= 513 && y === 896)
+    expect(new Set(ids).size).toBe(10)
+    expect(initial.filter(({ archetypeId }) => archetypeId === 'mushroom')).toHaveLength(4)
     expect(slime).toMatchObject({ archetypeId: 'slime', hp: 71, maxHp: 71, y: 896 })
-    for (const client of [page, mover]) await expect(scene(client)).toHaveAttribute('data-monster-sprites', slime.monsterId)
+    for (const client of [page, mover]) await expect(scene(client)).toHaveAttribute('data-monster-sprites', sprites)
     await expect(scene(page)).toHaveAttribute('data-peer-sprites', '1')
     const history = (client) =>
       scene(client).evaluate(
@@ -329,10 +576,16 @@ test('interpolates under patch jitter and synchronizes the shared monster throug
             collect()
           })
       )
-    const [first, second] = (await Promise.all([history(page), history(mover)])).map((snapshots) => new Map(snapshots))
-    const commonTicks = [...first.keys()].filter((tick) => second.has(tick))
-    expect(commonTicks.length).toBeGreaterThanOrEqual(3)
-    for (const tick of commonTicks) expect(first.get(tick)).toEqual(second.get(tick))
+    async function expectSharedPositions() {
+      const [first, second] = (await Promise.all([history(page), history(mover)])).map((snapshots) => new Map(snapshots))
+      const commonTicks = [...first.keys()].filter((tick) => second.has(tick))
+      expect(commonTicks.length).toBeGreaterThanOrEqual(3)
+      for (const tick of commonTicks) {
+        expect(first.get(tick).map(({ monsterId }) => monsterId)).toEqual(ids)
+        expect(first.get(tick)).toEqual(second.get(tick))
+      }
+    }
+    await expectSharedPositions()
 
     network.jitter(true)
     await mover.bringToFront()
@@ -369,25 +622,27 @@ test('interpolates under patch jitter and synchronizes the shared monster throug
     await expect(page.getByLabel('同房角色數')).toHaveText('同房 1 人')
     await expect(scene(page)).toHaveAttribute('data-remote-frame', '')
     await expect(scene(page)).toHaveAttribute('data-peer-sprites', '0')
-    await expect(scene(page)).toHaveAttribute('data-monster-sprites', slime.monsterId)
+    await expect(scene(page)).toHaveAttribute('data-monster-sprites', sprites)
     await expect(canvas(mover)).toHaveCount(0)
     await mover.getByRole('button', { name: '載入場景' }).click()
     await expect(page.getByLabel('同房角色數')).toHaveText('同房 2 人')
     await expect(scene(page)).toHaveAttribute('data-peer-sprites', '1')
-    await expect(scene(mover)).toHaveAttribute('data-monster-sprites', slime.monsterId)
-    expect((await projection(mover)).monsters[0]).toMatchObject({ monsterId: slime.monsterId, hp: slime.hp })
+    await expect(scene(mover)).toHaveAttribute('data-monster-sprites', sprites)
+    expect(await readSlime(mover)).toMatchObject({ hp: slime.hp })
 
-    expect(fixture.queueFixtureEvent('test-hp')).toBe(true)
-    expect(fixture.queueFixtureEvent('test-hp')).toBe(false)
+    const disconnected = moverSeat()
+    const character = await scene(mover).getAttribute('data-multiplayer-character-id')
+    expect(fixture.drop(disconnected)).toBe(true)
+    await expect.poll(() => recoveredSeat()?.roomId).toBe(disconnected.roomId)
+    expect(recoveredSeat().sessionId).not.toBe(disconnected.sessionId)
+    await expect(scene(mover)).toHaveAttribute('data-multiplayer-character-id', character)
+    await expect(scene(mover)).toHaveAttribute('data-monster-sprites', sprites)
+    await expectSharedPositions()
+
     for (const client of [page, mover]) {
-      await expect.poll(async () => (await projection(client)).monsters[0]).toMatchObject({ monsterId: slime.monsterId, hp: 35 })
-      await expect(scene(client)).toHaveAttribute('data-monster-sprites', slime.monsterId)
-    }
-    expect(fixture.queueFixtureEvent('remove')).toBe(true)
-    expect(fixture.queueFixtureEvent('remove')).toBe(false)
-    for (const client of [page, mover]) {
-      await expect.poll(async () => (await projection(client)).monsters).toEqual([])
-      await expect(scene(client)).toHaveAttribute('data-monster-sprites', '')
+      await expect.poll(() => readSlime(client)).toMatchObject({ hp: slime.hp, generation: 1 })
+      await expect(scene(client)).toHaveAttribute('data-monster-sprites', sprites)
+      await expect.poll(() => readIds(client)).toEqual(ids)
       await expect(canvas(client)).toHaveCount(1)
     }
     expect(errors).toEqual([])
@@ -447,16 +702,17 @@ test('plays the two-browser slice at 150 ms RTT through transfer and reconnect',
     await expect(count(traveler)).toHaveText('同房 2 人')
     await expect(scene(traveler)).toHaveAttribute('data-multiplayer-scene-revision', '1')
     const characterId = await scene(traveler).getAttribute('data-multiplayer-character-id')
-    const slime = await scene(page).getAttribute('data-monster-sprites')
+    const monsters = (await monsterProjection(page)).monsters.map(({ monsterId, hp }) => ({ monsterId, hp }))
+    const sprites = monsters.map(({ monsterId }) => monsterId).join(',')
     expect(characterId).toBeTruthy()
-    expect(slime).toBeTruthy()
+    expect(monsters).toHaveLength(10)
     await canvas(traveler).evaluate((element) => {
       globalThis.travelCanvas = element
     })
     for (const client of [page, traveler]) {
       await expect
-        .poll(() => scene(client).evaluate(({ dataset }) => JSON.parse(dataset.sharedMonsters ?? '[]')))
-        .toEqual([expect.objectContaining({ monsterId: slime, hp: 71 })])
+        .poll(async () => (await monsterProjection(client)).monsters.map(({ monsterId, hp }) => ({ monsterId, hp })))
+        .toEqual(monsters)
       await expect.poll(() => remote(client)).toMatchObject({ y: 848 })
     }
 
@@ -464,13 +720,26 @@ test('plays the two-browser slice at 150 ms RTT through transfer and reconnect',
     const keyboardStart = await remote(traveler)
     await page.bringToFront()
     await page.getByRole('region', { name: '平台測試場' }).focus()
-    await page.keyboard.down('ArrowRight')
-    await expect(hud(page)).toContainText('跑步 · 朝右')
-    await expect.poll(async () => (await remote(traveler))?.x).toBeGreaterThan(keyboardStart.x + 24)
-    await page.keyboard.up('ArrowRight')
+    // 在入口安全側驗證延遲下的跳躍。Slime 命中會改變角色動作。
+    await page.keyboard.down('ArrowLeft')
+    await expect(hud(page)).toContainText('跑步 · 朝左')
+    await expect.poll(async () => (await remote(traveler))?.x).toBeLessThan(keyboardStart.x - 24)
+    await page.keyboard.up('ArrowLeft')
+    const jumpTrace = await scene(traveler).evaluateHandle((host) => {
+      const { MutationObserver } = globalThis
+      let minY = Number.POSITIVE_INFINITY
+      const observer = new MutationObserver(() => {
+        const frame = host.dataset.remoteFrame
+        if (frame) minY = Math.min(minY, JSON.parse(frame).y)
+      })
+      observer.observe(host, { attributes: true, attributeFilter: ['data-remote-frame'] })
+      return { read: () => minY, stop: () => observer.disconnect() }
+    })
     await page.keyboard.press('Space')
     await expect(hud(page)).toContainText('跳躍')
-    await expect.poll(async () => (await remote(traveler))?.y).toBeLessThan(keyboardStart.y - 15)
+    await expect.poll(() => jumpTrace.evaluate((trace) => trace.read())).toBeLessThan(keyboardStart.y - 15)
+    await jumpTrace.evaluate((trace) => trace.stop())
+    await jumpTrace.dispose()
     await expect(hud(page)).toContainText('待機')
 
     await traveler.bringToFront()
@@ -485,8 +754,9 @@ test('plays the two-browser slice at 150 ms RTT through transfer and reconnect',
     const releaseTouch = () => touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     await pressTouch('向右')
     await expect(hud(traveler)).toContainText('跑步 · 朝右')
-    await expect.poll(async () => (await remote(page))?.x).toBeGreaterThan(touchStart.x + 24)
+    await expect.poll(predictedX, { intervals: [25] }).toBeGreaterThan(touchStart.x + 36)
     await releaseTouch()
+    await expect.poll(async () => (await remote(page))?.x).toBeGreaterThan(touchStart.x + 24)
     await expect(hud(traveler)).toContainText('待機')
     await pressTouch('跳躍')
     await expect(hud(traveler)).toContainText('跳躍')
@@ -523,7 +793,7 @@ test('plays the two-browser slice at 150 ms RTT through transfer and reconnect',
     await expect(scene(traveler)).toHaveAttribute('data-remote-frame', '')
     await expect(scene(traveler)).toHaveAttribute('data-peer-sprites', '0')
     await expect(scene(traveler)).toHaveAttribute('data-monster-sprites', '')
-    await expect(scene(page)).toHaveAttribute('data-monster-sprites', slime)
+    await expect(scene(page)).toHaveAttribute('data-monster-sprites', sprites)
     expect(fixture.players(observerSeat())).not.toContain(characterId)
     expect(fixture.players(destinationSeat())).toEqual([characterId])
     expect(trips).toBe(1)
@@ -559,7 +829,7 @@ test('plays the two-browser slice at 150 ms RTT through transfer and reconnect',
     await expect(scene(traveler)).toHaveAttribute('data-multiplayer-character-id', characterId)
     await expect(scene(traveler)).toHaveAttribute('data-multiplayer-map-epoch', '2')
     await expect(scene(traveler)).toHaveAttribute('data-peer-sprites', '1')
-    await expect(scene(traveler)).toHaveAttribute('data-monster-sprites', slime)
+    await expect(scene(traveler)).toHaveAttribute('data-monster-sprites', sprites)
     expect(fixture.players(observerSeat()).filter((id) => id === characterId)).toHaveLength(1)
     expect(trips).toBe(2)
 

@@ -1,5 +1,6 @@
 import {
   toSimulationTick,
+  type AttackId,
   type CharacterId,
   type MoveX,
   type NonNegativeSafeInteger,
@@ -7,14 +8,20 @@ import {
   type SimulationTick,
   type WorldPoint,
 } from '@viesma/domain'
-import { initialPlayerLifecycleBalance } from '@viesma/game-data'
+import { initialPhysicsBalance, initialPlayerLifecycleBalance } from '@viesma/game-data'
 import type { PhysicsVelocity } from '@viesma/physics'
 
 export type FacingDirection = 'left' | 'right'
 export type PlayerLocomotion = 'idle' | 'run' | 'jump' | 'fall'
+export interface PlayerSwing {
+  readonly attackId: AttackId
+  readonly acceptedTick: SimulationTick
+  readonly inputSeq: NonNegativeSafeInteger
+}
+
 export type PlayerAction =
   | { readonly kind: 'none' }
-  | { readonly kind: 'attack'; readonly facing: FacingDirection }
+  | { readonly kind: 'attack'; readonly facing: FacingDirection; readonly swing?: PlayerSwing }
   | { readonly kind: 'hurt'; readonly ticksRemaining: number }
   | { readonly kind: 'death'; readonly diedAtTick: SimulationTick }
 export type PlayerPresentationState = PlayerLocomotion | Exclude<PlayerAction['kind'], 'none'>
@@ -43,6 +50,7 @@ export interface SimulationPlayer extends Player {
   readonly vitals: PlayerVitals
   readonly lifeStartedTick: SimulationTick
   readonly lastHurtTick: SimulationTick | null
+  readonly lastAttackStartedTick: SimulationTick | null
   readonly spawnProtected: boolean
   readonly spawnProtectionStartedTick: SimulationTick
   readonly physics: PlayerPhysicsState
@@ -85,6 +93,7 @@ export function createPlayer(
     vitals: { hp: maxHp, maxHp, mp: maxMp, maxMp },
     lifeStartedTick: toSimulationTick(0),
     lastHurtTick: null,
+    lastAttackStartedTick: null,
     spawnProtected: false,
     spawnProtectionStartedTick: toSimulationTick(0),
     physics: { velocity: { x: 0, y: 0 }, grounded, inVoid: false },
@@ -93,6 +102,18 @@ export function createPlayer(
     locomotion: grounded ? 'idle' : 'fall',
     action: { kind: 'none' },
   }
+}
+
+export function playerFeet({ position }: SimulationPlayer): WorldPoint {
+  return {
+    x: position.x + initialPhysicsBalance.bodyWidthWorldUnits / 2,
+    y: position.y + initialPhysicsBalance.bodyHeightWorldUnits,
+  }
+}
+
+export function playerCenter(player: SimulationPlayer): WorldPoint {
+  const { x, y } = playerFeet(player)
+  return { x, y: y - initialPhysicsBalance.bodyHeightWorldUnits / 2 }
 }
 
 export function placePlayerAtSpawn(player: SimulationPlayer, position: WorldPoint, facing: FacingDirection): SimulationPlayer {

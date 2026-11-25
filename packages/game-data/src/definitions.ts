@@ -252,12 +252,19 @@ export function monsterMaxHpAtLevel(monster: MonsterDefinition, level: number, s
   return (BigInt(monster.baseHp) * (bps + BigInt(level - 1) * BigInt(scaling.hpGrowthBpsPerLevel)) + bps / 2n) / bps
 }
 
+export function monsterAttackAtLevel(monster: MonsterDefinition, level: number, scaling: MonsterScalingDefinition): bigint {
+  return BigInt(monster.baseAttack) + BigInt(level - 1) * BigInt(scaling.attackPerLevel)
+}
+
+export function monsterDefenseAtLevel(monster: MonsterDefinition, level: number, scaling: MonsterScalingDefinition): bigint {
+  return BigInt(monster.baseDefense) + BigInt(level - 1) / BigInt(scaling.levelsPerDefensePoint)
+}
+
 function validateScaledStats(monster: MonsterDefinition, levelCap: number, scaling: MonsterScalingDefinition, path: string): void {
-  const steps = BigInt(levelCap - 1)
   // 非負成長在等級上限取得最大值。
   const hp = monsterMaxHpAtLevel(monster, levelCap, scaling)
-  const attack = BigInt(monster.baseAttack) + steps * BigInt(scaling.attackPerLevel)
-  const defense = BigInt(monster.baseDefense) + steps / BigInt(scaling.levelsPerDefensePoint)
+  const attack = monsterAttackAtLevel(monster, levelCap, scaling)
+  const defense = monsterDefenseAtLevel(monster, levelCap, scaling)
   const exp = BigInt(monster.baseExp) * BigInt(levelCap)
   for (const [key, value] of Object.entries({ baseHp: hp, baseAttack: attack, baseDefense: defense, baseExp: exp })) {
     if (value > BigInt(maxContentInteger)) {
