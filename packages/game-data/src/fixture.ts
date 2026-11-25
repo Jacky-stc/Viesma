@@ -144,16 +144,19 @@ function monsters(): readonly MonsterSource[] {
   ]
 }
 
-const equipmentTierLevels = [1, 5, 10, 15, 20, 25] as const
+const equipmentTierIds = [
+  [1, starterWeaponId, 'armor_tier_1', 'accessory_tier_1'],
+  [5, 'sword_tier_5', 'armor_tier_5', 'accessory_tier_5'],
+  [10, 'sword_tier_10', 'armor_tier_10', 'accessory_tier_10'],
+  [15, 'sword_tier_15', 'armor_tier_15', 'accessory_tier_15'],
+  [20, 'sword_tier_20', 'armor_tier_20', 'accessory_tier_20'],
+  [25, 'sword_tier_25', 'armor_tier_25', 'accessory_tier_25'],
+] as const
 
 function equipmentFixture() {
   const items: ItemSource[] = []
-  const equipmentTiers = equipmentTierLevels.map((level, index) => {
-    const itemsBySlot = {
-      weapon: level === 1 ? starterWeaponId : `sword_tier_${level}`,
-      armor: `armor_tier_${level}`,
-      accessory: `accessory_tier_${level}`,
-    }
+  const equipmentTiers = equipmentTierIds.map(([level, weapon, armor, accessory], index) => {
+    const itemsBySlot = { weapon, armor, accessory }
     const base = { kind: 'equipment', requiredLevel: level, maxStack: 1 } as const
     items.push(
       {

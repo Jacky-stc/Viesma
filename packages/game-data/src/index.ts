@@ -1,3 +1,4 @@
+export type { LootEntryId } from '@viesma/domain'
 export { monsterAttackAtLevel, monsterDefenseAtLevel, monsterMaxHpAtLevel } from './definitions.js'
 export { initialEncounterRewardBalance } from './encounter-rewards.js'
 export { createInitialGameDataSource } from './fixture.js'
@@ -35,7 +36,7 @@ export type {
   NormalizedTileLayer,
   NormalizedTileset,
 } from './tiled/types.js'
-export { GAME_DATA_SCHEMA_VERSION } from './types.js'
+export { GAME_DATA_SCHEMA_VERSION, equipmentSlots } from './types.js'
 export type {
   EquipmentModifiers,
   EquipmentSlot,
@@ -44,7 +45,6 @@ export type {
   GameDataSource,
   ItemDefinition,
   LootEntry,
-  LootEntryId,
   LootTable,
   LootTableId,
   MapDefinition,

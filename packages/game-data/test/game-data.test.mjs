@@ -1,5 +1,8 @@
 import {
   createInitialGameDataSource,
+  deriveCombatStats,
+  getStarterWeaponModifiers,
+  initialBaseAttributes,
   initialPhysicsBalance,
   loadGameData,
   loadPlayerMovementBalance,
@@ -65,6 +68,54 @@ test('loads the documented progression, world and reward fixtures', () => {
     maxStack: 1,
   })
   expect(data.lootTables[0].entries.map(({ chanceBps }) => chanceBps)).toEqual([10_000, 3_000, 1_500, 6_000, 500])
+})
+
+test('keeps starter items, cash and archetype materials under the existing balance version', () => {
+  const data = loadGameData(createInitialGameDataSource())
+  const item = (itemId) => data.items.find(({ id }) => id === itemId)
+  expect(data.balanceVersion).toBe('mvp-1')
+  expect(item('hp_potion')).toMatchObject({ kind: 'consumable', resource: 'hp', restoreAmount: 50, maxStack: 99 })
+  expect(item('mp_potion')).toMatchObject({ kind: 'consumable', resource: 'mp', restoreAmount: 30, maxStack: 99 })
+  expect(item('currency')).toBeUndefined()
+  expect(data.lootTables[0].entries[0]).toEqual({
+    kind: 'currency',
+    id: 'currency',
+    chanceBps: 10_000,
+    minPerLevel: 3,
+    maxPerLevel: 5,
+  })
+  expect(data.monsters.map(({ materialItemId }) => materialItemId)).toEqual(['slime_gel', 'spore', 'bat_membrane'])
+  for (const { materialItemId } of data.monsters) {
+    expect(item(materialItemId)).toMatchObject({ kind: 'material', maxStack: 99 })
+  }
+  expect(getStarterWeaponModifiers(data)).toEqual({ attackPower: 3 })
+})
+
+test.each([
+  [1, 'training_sword', 'armor_tier_1', 'accessory_tier_1', 3, 2, 1],
+  [5, 'sword_tier_5', 'armor_tier_5', 'accessory_tier_5', 5, 4, 2],
+  [10, 'sword_tier_10', 'armor_tier_10', 'accessory_tier_10', 7, 6, 3],
+  [15, 'sword_tier_15', 'armor_tier_15', 'accessory_tier_15', 9, 8, 4],
+  [20, 'sword_tier_20', 'armor_tier_20', 'accessory_tier_20', 11, 10, 5],
+  [25, 'sword_tier_25', 'armor_tier_25', 'accessory_tier_25', 13, 12, 6],
+])('loads the stable level %i equipment and applies its modifiers through M5.1 stats', (level, weapon, armor, accessory, atk, def, str) => {
+  const data = loadGameData(createInitialGameDataSource())
+  const itemsBySlot = { weapon, armor, accessory }
+  expect(data.equipmentTiers.find((tier) => tier.level === level)).toEqual({ level, itemsBySlot })
+  const expectedModifiers = { weapon: { attackPower: atk }, armor: { physicalDefense: def }, accessory: { str } }
+  const modifiers = {}
+  for (const [slot, id] of Object.entries(itemsBySlot)) {
+    const definition = data.items.find((item) => item.id === id)
+    expect(definition).toMatchObject({ kind: 'equipment', slot, requiredLevel: level, maxStack: 1, modifiers: expectedModifiers[slot] })
+    Object.assign(modifiers, definition.modifiers)
+  }
+  const base = deriveCombatStats(level, initialBaseAttributes)
+  expect(deriveCombatStats(level, initialBaseAttributes, modifiers)).toEqual({
+    ...base,
+    maxHp: base.maxHp + 5 * str,
+    attackPower: base.attackPower + atk + 2 * str,
+    physicalDefense: base.physicalDefense + def,
+  })
 })
 
 test.each([
@@ -373,6 +424,70 @@ test.each([
     'items[5].modifiers.attackPower',
     (data) => {
       data.items[5].modifiers.attackPower = -3
+    },
+  ],
+  [
+    'equipment affix metadata',
+    'UNKNOWN_FIELD',
+    'items[5].metadata',
+    (data) => {
+      data.items[5].metadata = { affix: 'untested' }
+    },
+  ],
+  [
+    'unknown equipment modifier',
+    'UNKNOWN_FIELD',
+    'items[5].modifiers.lootChance',
+    (data) => {
+      data.items[5].modifiers.lootChance = 100
+    },
+  ],
+  [
+    'equipment requirement over the level cap',
+    'OUT_OF_RANGE',
+    'items[5].requiredLevel',
+    (data) => {
+      data.items[5].requiredLevel = 26
+    },
+  ],
+  [
+    'potion effect metadata for an unknown resource',
+    'INVALID_VALUE',
+    'items[0].resource',
+    (data) => {
+      data.items[0].resource = 'stamina'
+    },
+  ],
+  [
+    'potion with fractional restore amount',
+    'OUT_OF_RANGE',
+    'items[0].restoreAmount',
+    (data) => {
+      data.items[0].restoreAmount = 1.5
+    },
+  ],
+  [
+    'currency entry with bag metadata',
+    'UNKNOWN_FIELD',
+    'lootTables[0].entries[0].maxStack',
+    (data) => {
+      data.lootTables[0].entries[0].maxStack = 99
+    },
+  ],
+  [
+    'missing item definition for a fixed loot entry',
+    'UNKNOWN_REFERENCE',
+    'lootTables[0].entries[1].itemId',
+    (data) => {
+      data.lootTables[0].entries[1].itemId = 'missing_potion'
+    },
+  ],
+  [
+    'equipment tier linked to an item of a different level',
+    'INVALID_REFERENCE',
+    'equipmentTiers[5].itemsBySlot.weapon',
+    (data) => {
+      data.equipmentTiers[5].itemsBySlot.weapon = 'sword_tier_20'
     },
   ],
   [

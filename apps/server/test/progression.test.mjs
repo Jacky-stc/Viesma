@@ -1,7 +1,11 @@
 import { PROTOCOL_VERSION } from '@viesma/protocol'
+import { Buffer } from 'node:buffer'
+import { createSecretKey } from 'node:crypto'
 import { setImmediate } from 'node:timers/promises'
 import { expect, test, vi } from 'vitest'
 import { createMemoryEncounterRewardPort } from '../src/runtime/encounter-reward-worker.ts'
+import { createServerLootRng } from '../src/runtime/loot-rng.ts'
+import { createMemoryPersonalLootRepository } from '../src/runtime/memory-personal-loot.ts'
 import { createWorldCoordinator } from '../src/runtime/world-coordinator.ts'
 import { progressionTestData } from './progression-fixture.mjs'
 import { combatPeer, sendCombatInput } from './shared-combat-fixture.mjs'
@@ -65,6 +69,45 @@ function harness(rewardPort) {
   }
   return { world, m1, peer, join, advance, snapshot, body, payload, request, attack, expectResult, running: () => Boolean(wake) }
 }
+
+test('settles loot from a real frozen death intent without changing M5.1 progression or sending loot or its secret', async () => {
+  const memory = createMemoryEncounterRewardPort()
+  const port = { ...memory, commitReward: vi.fn(memory.commitReward) }
+  const h = harness(port)
+  const owner = h.join()
+  const observer = h.join()
+  await h.advance()
+  h.attack(owner)
+  await h.advance(8)
+  const [[intent]] = port.commitReward.mock.calls
+  expect(Object.isFrozen(intent)).toBe(true)
+  expect(intent.groups[0].eligibleCharacterIds).toEqual([owner.session.characterId])
+  expect(h.snapshot(owner)).toMatchObject({ level: 2, characterVersion: 1 })
+  expect(h.snapshot(observer)).toMatchObject({ level: 1, characterVersion: 0 })
+
+  const secret = 'synthetic m52 server secret'
+  const randomForEntry = createServerLootRng(createSecretKey(Buffer.from(secret, 'utf8')))
+  const repository = createMemoryPersonalLootRepository({ randomForEntry, nowUtcMilliseconds: () => 1_795_000_000_000 })
+  const worldViews = () => ({
+    publicState: h.m1.snapshot(),
+    ownerView: h.snapshot(owner),
+    observerView: h.snapshot(observer),
+    ownerProgressionMessages: owner.progression.mock.calls,
+    observerProgressionMessages: observer.progression.mock.calls,
+  })
+  const before = globalThis.structuredClone(worldViews())
+  const receipt = repository.commitReward(intent, progressionTestData())
+  expect(worldViews()).toEqual(before)
+  expect(new Set(receipt.grants.map(({ ownerCharacterId }) => ownerCharacterId))).toEqual(new Set([owner.session.characterId]))
+  expect(receipt.grants.find(({ tableEntryId }) => tableEntryId === 'currency').content.kind).toBe('currency')
+  const serializedViews = JSON.stringify(worldViews())
+  for (const { lootId } of receipt.grants) {
+    expect(serializedViews).not.toContain(JSON.stringify(lootId))
+  }
+  expect(JSON.stringify({ receipt, views: worldViews() })).not.toContain(secret)
+  h.world.disposeRoom(h.m1)
+  expect(repository.findCommittedReward(intent.claim.deathId)).toBe(receipt)
+})
 
 test('settles solo EXP once after lost acknowledgements, source disposal, transfer and reconnect', async () => {
   const gate = Promise.withResolvers()

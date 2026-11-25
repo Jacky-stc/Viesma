@@ -24,7 +24,7 @@ Server 和 client 共同使用 `loadGrayboxGameData` 載入隨程式發布的七
 - `initialMonsterAiBalance` 啟用 GAME_DESIGN 的 `mvp-1` 目標掃描、aggro／lose-target／leash、失去目標與攻擊時序，以及 M4.4 的 corpse 30 ticks、respawn wait 300 ticks。 `loadMonsterAiBalance` 驗證數值範圍、半徑順序及 cooldown 長度。Spawn director 使用已驗證的 archetype、等級、巡邏區間或飛行區域，按 spawn ID 選取最多 `world.maxMonstersPerMap` 個出生點。
 - `initialPlayerAttackBalance` 集中 M4.2 普攻時序、48 × 40 命中矩形、目標上限、怪物戰鬥中心與暴擊倍率。`getBeginnerCombatStats` 從已驗證的 Training Sword 與 Beginner 初始屬性計算普攻、物防、魔防及暴擊基點。怪物 HP、ATK、DEF 使用同一套載入驗證與出生等級縮放公式。 [戰鬥規則](GAME_DESIGN.md#4-combat)
 - `initialEncounterRewardBalance` 集中 M4.3 使用的既定 `mvp-1` 門檻。累計傷害至少 100 基點（1%，向上取整且至少 1），最近傷害在 450 ticks 內，角色戰鬥中心距怪物死亡中心至多 640 world units。 [合格條件](GAME_DESIGN.md#63-death-time-eligibility)
-- `items` 區分消耗品、素材、裝備。裝備槽的資料 ID 為 `weapon`、`armor`、`accessory`。`equipmentTiers` 提供各層級的三槽測試定義。`lootTables` 描述各自獨立的掉落項目，機率單位為基點，`10000` 代表 100%。固定物品與素材的數量區間最多一疊，裝備 tier 指向三個同級、槽位相符的物品。
+- `items` 區分消耗品、素材、裝備。藥水保留 `hp_potion`、`mp_potion` 及其恢復量和堆疊上限。裝備槽的資料 ID 為 `weapon`、`armor`、`accessory`，`equipmentTiers` 的六層各有三個固定 ID。Lv1 武器沿用 `training_sword`。`lootTables` 的 `currency` entry 定義貨幣機率與按怪物等級計算的金額區間，拾取後計入獨立 purse。機率單位為基點，`10000` 代表 100%。固定物品與素材的數量區間最多一疊，裝備 tier 指向三個同級、槽位相符的物品。M5.2 的記憶體結算使用既有的 `mvp-1` 掉落配置及 120 秒到期規則。 [掉落表](GAME_DESIGN.md#7-personal-loot)
 
 內容 ID 用穩定的小寫 ASCII 字串，各類別使用不同型別。Portal 與 spawn ID 各自在地圖內唯一，loot entry ID 在表內唯一。Runtime 的 `monsterId`、`lootId`、`mapInstanceId` 以及 `characterId`、`itemInstanceId` 等持久識別由各自的 owner 配發。
 

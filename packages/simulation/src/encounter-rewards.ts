@@ -49,6 +49,11 @@ export interface EncounterRewardIntent {
   }[]
 }
 
+export function getSoloEligibleCharacterId(group: EncounterRewardIntent['groups'][number]): CharacterId | undefined {
+  const [characterId] = group.eligibleCharacterIds
+  return group.effectiveDamage > 0 && characterId && group.groupKey === `solo:${characterId}` ? characterId : undefined
+}
+
 export interface MonsterDeathClaimedEvent {
   readonly kind: 'monsterDeathClaimed'
   readonly intent: EncounterRewardIntent

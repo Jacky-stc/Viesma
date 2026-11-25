@@ -271,6 +271,8 @@ M4.4 同一固定 tick 驗證 receipt 的 deathId、monsterId、generation 與 e
 
 M5.1 的匿名角色由 WorldCoordinator 持有一份記憶體成長 aggregate，入房時建立，換圖與保留席位期間的重連沿用同一份。Reward worker 收下凍結意圖時保留單人授予目標。記憶體 port receipt 通過身分驗證後，在固定 tick 內先套用單人 EXP 並更新版本，再完成 encounter receipt。AP 在同一世界 tick 內、交接判定後與戰鬥步進前處理，使用當下的版本和角色狀態。請求 ID 在目前連線 epoch 內遞增，最近一次結案可重送，同 ID 變更內容須拒絕。完整的 EXP 與 ground grants 交易及故障驗證屬 M5.5。
 
+M5.2 的 server-only 記憶體 adapter 接受凍結的 `EncounterRewardIntent`，以死亡地圖與 spawn ID 從同版本的已驗證資料取得怪物階級及掉落表。每個 owner／entry 的 roll 以 server secret、deathId、ownerCharacterId、tableEntryId 和 stream counter 派生。Pending grant 保留物品定義 ID／數量或貨幣金額、balanceVersion、來源地圖／instance 與死亡座標。Death settlement 成功寫入記憶體時，以 UTC wall clock 設定原始到期時間，按 deathId 取得原 receipt。Grant ID 以 deathId、ownerCharacterId 和 tableEntryId 編碼。M5.4 負責最終安全座標、delivery instance、可見性及拾取。M5.5 將此結算契約接入現行 reward worker，並把到期時間錨定在 EXP 與 ground grants 的同一次原子提交。
+
 後續完整獎勵依下列契約交付。
 
 1. Combat applyHit 檢查 monster lifecycle／attackId，寫入 EffectiveDamage 與 first-hit group lock。

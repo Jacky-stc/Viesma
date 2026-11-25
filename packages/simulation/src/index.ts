@@ -1,6 +1,11 @@
 export { createSolidPointSweep as createMonsterMovement, createSolidObstructionTest } from '@viesma/physics'
 export type { CombatDamageEvent, CombatStepContext, MonsterDamageEvent } from './combat.js'
-export type { EncounterRewardIntent, MonsterDeathClaim, PartyMembership } from './encounter-rewards.js'
+export {
+  getSoloEligibleCharacterId,
+  type EncounterRewardIntent,
+  type MonsterDeathClaim,
+  type PartyMembership,
+} from './encounter-rewards.js'
 export { createFixedTickDriver, fixedDeltaSeconds, maxCatchUpTicks, ticksPerSecond } from './fixed-tick.js'
 export type { FixedTick, FixedTickAdvance, FixedTickDriver, MonotonicClock } from './fixed-tick.js'
 export {

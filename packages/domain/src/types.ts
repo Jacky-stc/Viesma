@@ -13,6 +13,7 @@ export type PartyId = Branded<string, 'PartyId'>
 export type MembershipToken = Branded<string, 'MembershipToken'>
 export type DeathId = Branded<string, 'DeathId'>
 export type LootId = Branded<string, 'LootId'>
+export type LootEntryId = Branded<string, 'LootEntryId'>
 export type ItemDefinitionId = Branded<string, 'ItemDefinitionId'>
 export type ItemInstanceId = Branded<string, 'ItemInstanceId'>
 export type SessionEpoch = Branded<string, 'SessionEpoch'>

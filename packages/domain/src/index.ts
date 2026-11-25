@@ -22,6 +22,7 @@ export type {
   EncounterId,
   ItemDefinitionId,
   ItemInstanceId,
+  LootEntryId,
   LootId,
   MapId,
   MapInstanceId,

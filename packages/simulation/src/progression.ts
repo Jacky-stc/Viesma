@@ -7,7 +7,7 @@ import {
   type NonNegativeSafeInteger,
 } from '@viesma/domain'
 import { initialBaseAttributes, type ProgressionDefinition } from '@viesma/game-data'
-import type { EncounterRewardIntent } from './encounter-rewards.js'
+import { getSoloEligibleCharacterId, type EncounterRewardIntent } from './encounter-rewards.js'
 
 export function createCharacterAggregate(characterId: CharacterId): CharacterAggregate {
   return {
@@ -84,7 +84,7 @@ export function allocateSoloExperience(
   })
   return pools.flatMap(({ group, pool }, index) => {
     const exp = pool + Number(index < remaining)
-    const [characterId] = group.eligibleCharacterIds
-    return exp > 0 && characterId && group.groupKey === `solo:${characterId}` ? [{ characterId, exp }] : []
+    const characterId = getSoloEligibleCharacterId(group)
+    return exp > 0 && characterId ? [{ characterId, exp }] : []
   })
 }

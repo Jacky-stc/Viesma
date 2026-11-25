@@ -4,6 +4,7 @@ import type {
   DeathId,
   ItemDefinitionId,
   ItemInstanceId,
+  LootEntryId,
   LootId,
   MapId,
   MapInstanceId,
@@ -35,13 +36,25 @@ export interface PlaySession {
   readonly sessionEpoch: SessionEpoch
 }
 
-export interface GroundLootGrant {
+interface GroundLootRoll {
   readonly lootId: LootId
-  readonly position: WorldPoint
+  readonly deathId: DeathId
+  readonly ownerCharacterId: CharacterId
+  readonly tableEntryId: LootEntryId
+  readonly balanceVersion: string
+  readonly mapId: MapId
+  readonly placement: {
+    readonly kind: 'pending'
+    readonly sourceMapInstanceId: MapInstanceId
+    readonly deathPosition: WorldPoint
+  }
   readonly content:
     | { readonly kind: 'currency'; readonly amount: NonNegativeSafeInteger }
     | { readonly kind: 'item'; readonly itemDefinitionId: ItemDefinitionId; readonly quantity: NonNegativeSafeInteger }
 }
+
+export type GroundLootGrant = GroundLootRoll &
+  ({ readonly state: 'pending' } | { readonly state: 'committed'; readonly expiresAtUtcMilliseconds: NonNegativeSafeInteger })
 
 export interface RewardIntent {
   readonly deathId: DeathId
@@ -51,7 +64,7 @@ export interface RewardIntent {
   readonly recipients: readonly {
     readonly characterId: CharacterId
     readonly exp: NonNegativeSafeInteger
-    readonly groundLoot: readonly GroundLootGrant[]
+    readonly groundLoot: readonly Extract<GroundLootGrant, { readonly state: 'pending' }>[]
   }[]
 }
 

@@ -1,4 +1,4 @@
-import type { ItemDefinitionId, MapId } from '@viesma/domain'
+import type { ItemDefinitionId, LootEntryId, MapId } from '@viesma/domain'
 import type { NormalizedMap } from './tiled/types.js'
 
 export const GAME_DATA_SCHEMA_VERSION = 1
@@ -11,7 +11,6 @@ export type MonsterArchetypeId = ContentId<'MonsterArchetype'>
 export type PortalId = ContentId<'Portal'>
 export type SpawnId = ContentId<'Spawn'>
 export type LootTableId = ContentId<'LootTable'>
-export type LootEntryId = ContentId<'LootEntry'>
 
 export const equipmentSlots = ['weapon', 'armor', 'accessory'] as const
 export type EquipmentSlot = (typeof equipmentSlots)[number]
@@ -147,7 +146,7 @@ interface GameDataDocument {
   readonly lootTables: readonly LootTable[]
 }
 
-type SourceIds<T> = T extends ContentId<string> | MapId | ItemDefinitionId
+type SourceIds<T> = T extends ContentId<string> | MapId | ItemDefinitionId | LootEntryId
   ? string
   : T extends object
     ? { [Key in keyof T]: SourceIds<T[Key]> }

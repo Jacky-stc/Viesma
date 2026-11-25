@@ -1,6 +1,6 @@
 # 開發路線圖
 
-規格基線為 Task 0（2026-11-23）。正式任務由 45 項增為 46 項，新增 M5.6。目前 `DONE` 25 項（25／46，54.35%）、`NOT_STARTED` 21 項、`IN_PROGRESS`／`LOCAL_VERIFIED`／`BLOCKED` 各 0 項。進度以 `DONE` 除以正式任務總數計算，排除本次文件整理與五項風險檢查。 [協作規則](../AGENTS.md) · [驗證證據索引](evidence/README.md)
+規格基線為 Task 0（2026-11-23）。正式任務由 45 項增為 46 項，新增 M5.6。目前 `DONE` 25 項（25／46，54.35%）、`LOCAL_VERIFIED` 1 項、`NOT_STARTED` 20 項、`IN_PROGRESS`／`BLOCKED` 各 0 項。進度以 `DONE` 除以正式任務總數計算，排除本次文件整理與五項風險檢查。 [協作規則](../AGENTS.md) · [驗證證據索引](evidence/README.md)
 
 ## 1. 交付策略與 dependency graph
 
@@ -410,7 +410,7 @@ M5.1（`DONE`）→ 路線圖整理 → 啟動第一輪行動實機 smoke，與 
 - **Deliverables**：item／equipment definitions、loot roll policy、ground-grant model。
 - **Acceptance criteria**：同 death／owner retry 結果相同；currency 亦為 ground drop；equipment 非 stack；不向 client 暴露 seed。
 - **Required tests**：seeded rolls／probability boundary／tier reference／unique IDs／expiry clock、物品 metadata validation、level25 tier、D=0 無 roll。
-- **Status**：NOT_STARTED
+- **Status**：LOCAL_VERIFIED · [Evidence](evidence/M5.md#m52)
 
 ### M5.3 — 24-slot inventory 與 equipment mutations
 
