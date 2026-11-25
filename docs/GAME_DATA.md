@@ -7,7 +7,7 @@
 | `schemaVersion` | 初始為 `1`。文件形狀或欄位語意有不相容變更時提高版本。載入器只接受目前版本，舊資料須明確更新。 |
 | `balanceVersion` | 初始為 `mvp-1`，是整份內容的穩定版本標籤。變更已發布的資料或平衡時更新標籤，部署時整份換版。 |
 | `mapContentHash` | 以 UTF-8 編碼的 canonical manifest JSON 計算 SHA-256，表示為 64 碼小寫十六進位字串。包含 tile size、respawn、地圖基本資料、spawn ID、portal、怪物配置摘要及已匯入的正規化地圖。有匯入內容時加入 `tiledMaps` 欄位，空集合沿用 M0.4 的序列化。 |
-| `protocolVersion` | 由 `@viesma/protocol` 定義。M5.1 的私人進度快照與配置 AP 使用 `5`。Wire contract 有不相容變更時提高版本。 |
+| `protocolVersion` | 由 `@viesma/protocol` 定義。M5.3 的私人背包快照、裝備指令及跨連線收據重送使用 `6`。Wire contract 有不相容變更時提高版本。 |
 
 Server 和 client 共同使用 `loadGrayboxGameData` 載入隨程式發布的七張 Tiled JSON。Server 以 `serializeMapManifest` 計算入房版本的 hash。M3.1 接入 transport admission，`checkJoinVersion` 對 protocol、balance、map hash 依序精確比對。版本以部署為單位更新。
 

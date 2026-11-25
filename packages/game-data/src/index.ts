@@ -14,6 +14,7 @@ export {
   initialBaseAttributes,
   initialPlayerAttackBalance,
   maxBasisPoints,
+  starterInventory,
   type PlayerCombatStats,
 } from './player-combat.js'
 export {

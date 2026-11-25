@@ -7,6 +7,13 @@ import { integer, invalid, maxBasisPoints } from './validation.js'
 export { maxBasisPoints }
 
 export const starterWeaponId = 'training_sword'
+export const starterInventory = {
+  weapon: starterWeaponId,
+  bag: [
+    { id: 'hp_potion', quantity: 5 },
+    { id: 'mp_potion', quantity: 3 },
+  ],
+} as const
 export const initialBaseAttributes: Attributes = Object.freeze({ str: 4, dex: 4, int: 4, luk: 4 })
 
 export const initialPlayerAttackBalance = Object.freeze({

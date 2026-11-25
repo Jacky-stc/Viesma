@@ -1,9 +1,9 @@
+import type { CharacterCommandCode, CharacterEconomy } from './inventory.js'
 import type {
   AccountId,
   CharacterId,
   DeathId,
   ItemDefinitionId,
-  ItemInstanceId,
   LootEntryId,
   LootId,
   MapId,
@@ -18,16 +18,6 @@ export interface Character {
   readonly accountId: AccountId
   readonly displayName: string
   readonly version: NonNegativeSafeInteger
-}
-
-export interface ItemInstance {
-  readonly itemInstanceId: ItemInstanceId
-  readonly itemDefinitionId: ItemDefinitionId
-  readonly ownerCharacterId: CharacterId
-  readonly quantity: NonNegativeSafeInteger
-  readonly location:
-    | { readonly kind: 'bag'; readonly slot: NonNegativeSafeInteger }
-    | { readonly kind: 'equipment'; readonly slot: 'weapon' | 'armor' | 'accessory' }
 }
 
 export interface PlaySession {
@@ -77,8 +67,29 @@ export interface CharacterRepository {
   findCharacter(characterId: CharacterId): Promise<Character | undefined>
 }
 
+export interface CharacterMutationReceipt {
+  readonly key: string
+  readonly fingerprint: string
+  readonly code: CharacterCommandCode
+  readonly changed: boolean
+  readonly version: NonNegativeSafeInteger
+}
+
+export interface CharacterMutation {
+  readonly characterId: CharacterId
+  readonly expectedVersion: NonNegativeSafeInteger
+  readonly next: CharacterEconomy
+  readonly receipt: CharacterMutationReceipt
+}
+
+export type CharacterMutationResult =
+  | { readonly kind: 'committed' | 'replayed'; readonly receipt: CharacterMutationReceipt }
+  | { readonly kind: 'conflict' | 'stale' | 'invalid_inventory' | 'missing' }
+
 export interface InventoryRepository {
-  listItems(characterId: CharacterId): Promise<readonly ItemInstance[]>
+  // 收據查找必須先於 version check。比較版本、寫角色及寫收據屬同一交易。
+  findReceipt(characterId: CharacterId, key: string): CharacterMutationReceipt | undefined | Promise<CharacterMutationReceipt | undefined>
+  commit(mutation: CharacterMutation): CharacterMutationResult | Promise<CharacterMutationResult>
 }
 
 export interface SessionRepository {

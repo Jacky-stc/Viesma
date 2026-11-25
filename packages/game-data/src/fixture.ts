@@ -1,14 +1,15 @@
-import { stackableItemLimit } from './definitions.js'
+import { stackableItemLimit } from '@viesma/domain'
 import { initialBalanceVersion } from './initial-physics.js'
 import { requiredExp } from './load.js'
-import { starterWeaponId } from './player-combat.js'
+import { starterInventory, starterWeaponId } from './player-combat.js'
 import { GAME_DATA_SCHEMA_VERSION, type GameDataSource } from './types.js'
 
 const levelCap = 25
 const expCoefficient = 50
 const standardLootTableId = 'standard_monster'
-const hpPotionId = 'hp_potion'
-const mpPotionId = 'mp_potion'
+const [hpPotion, mpPotion] = starterInventory.bag
+const hpPotionId = hpPotion.id
+const mpPotionId = mpPotion.id
 
 type MapSource = GameDataSource['world']['maps'][number]
 type MonsterSource = GameDataSource['monsters'][number]

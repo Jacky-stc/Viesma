@@ -4,6 +4,7 @@ import { touchControls } from '../input/browser-input'
 import type { AuxiliaryAction } from '../input/input-state'
 import type { MultiplayerPresentation } from '../multiplayer/run-multiplayer'
 import { ApPanel } from './ap-panel'
+import { InventoryPanel } from './inventory-panel'
 import { runPlayground, type PlaygroundMode, type PlaygroundPresentation } from './run-playground'
 import type { DebugDamage } from './scene'
 
@@ -34,6 +35,8 @@ export function Playground() {
   const surfaceRef = useRef<HTMLElement>(null)
   const helpRef = useRef<HTMLDialogElement>(null)
   const apRef = useRef<HTMLDialogElement>(null)
+  const inventoryRef = useRef<HTMLDialogElement>(null)
+  const inventoryCloseRef = useRef<HTMLButtonElement>(null)
   const startup = useRef(Promise.resolve())
   const pendingDebugDamage = useRef<DebugDamage>(undefined)
   const pendingGuideClose = useRef<GuideInteraction>(undefined)
@@ -48,6 +51,7 @@ export function Playground() {
   const online = active && mode === 'multiplayer'
   const controlsReady = (interactive && presentation) || (online && multiplayer && !failed)
   const progression = online && !failed ? multiplayer?.progression : undefined
+  const inventory = online && !failed ? multiplayer?.inventory : undefined
   const guide = presentation?.guide
   const guideInteraction = presentation?.guideInteraction
 
@@ -81,13 +85,42 @@ export function Playground() {
       .then(async () => {
         if (mode === 'multiplayer') {
           const { runMultiplayer } = await import('../multiplayer/run-multiplayer')
-          return runMultiplayer(host, surface, setMultiplayer, setMultiplayerStatus, failedStartup, toggleApPanel, controller.signal)
+          return runMultiplayer(
+            host,
+            surface,
+            setMultiplayer,
+            setMultiplayerStatus,
+            failedStartup,
+            toggleApPanel,
+            toggleInventory,
+            controller.signal
+          )
         }
         return runPlayground(host, surface, mode, setPresentation, setActions, controller.signal, takeGuideClose, takeDebugDamage)
       })
       .catch(failedStartup)
     return () => controller.abort()
   }, [active, mode])
+
+  useEffect(() => {
+    const panel = inventoryRef.current
+    if (panel?.open && !panel.contains(document.activeElement)) {
+      inventoryCloseRef.current?.focus({ preventScroll: true })
+    }
+  }, [inventory, multiplayer?.equipmentStatus])
+
+  useEffect(() => {
+    if (!online) return
+    function closeInventoryOnKey(event: KeyboardEvent) {
+      const panel = inventoryRef.current
+      if (!panel?.open || event.code !== 'KeyI' || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
+      event.preventDefault()
+      event.stopPropagation()
+      if (!event.repeat) panel.close()
+    }
+    document.addEventListener('keydown', closeInventoryOnKey, true)
+    return () => document.removeEventListener('keydown', closeInventoryOnKey, true)
+  }, [online])
 
   function resetStatus() {
     pendingDebugDamage.current = undefined
@@ -106,6 +139,12 @@ export function Playground() {
 
   function toggleApPanel() {
     const panel = apRef.current
+    if (panel?.open) panel.close()
+    else panel?.showModal()
+  }
+
+  function toggleInventory() {
+    const panel = inventoryRef.current
     if (panel?.open) panel.close()
     else panel?.showModal()
   }
@@ -226,6 +265,14 @@ export function Playground() {
                     能力點數
                   </button>
                 )}
+                {inventory && (
+                  <button
+                    type="button"
+                    onClick={toggleInventory}
+                  >
+                    物品欄
+                  </button>
+                )}
               </div>
             </div>
             {controlsReady && <p className="playground-rotate">請將裝置轉為橫向以操作。</p>}
@@ -319,6 +366,38 @@ export function Playground() {
           )}
         </dialog>
       )}
+      {online && (
+        <dialog
+          className="playground-help ap-panel inventory-panel"
+          aria-labelledby="inventory-title"
+          ref={inventoryRef}
+          onClose={() => surfaceRef.current?.focus({ preventScroll: true })}
+        >
+          <header>
+            <h2 id="inventory-title">物品欄</h2>
+            {inventory && <span>金幣 {inventory.currency}</span>}
+            <button
+              type="button"
+              onClick={toggleInventory}
+              ref={inventoryCloseRef}
+            >
+              關閉
+            </button>
+          </header>
+          {inventory && multiplayer ? (
+            <InventoryPanel
+              key={inventory.connectionEpoch}
+              snapshot={inventory}
+              items={multiplayer.items}
+              status={multiplayer.equipmentStatus}
+              unavailable={Boolean(multiplayerStatus) || multiplayer.state === 'death'}
+              changeEquipment={multiplayer.changeEquipment}
+            />
+          ) : (
+            <p>等待背包資料…</p>
+          )}
+        </dialog>
+      )}
       <footer className="playground-footer">
         <ul aria-label="碰撞圖例">
           <li className="legend-solid">實體地形</li>
@@ -371,6 +450,15 @@ export function Playground() {
                     能力點數（K）
                   </button>
                 </>
+              )}
+              {inventory && (
+                <button
+                  className="ap-hud-button"
+                  type="button"
+                  onClick={toggleInventory}
+                >
+                  物品欄（I）
+                </button>
               )}
               {multiplayer.state === 'death' && <span role="status">已倒下，等待返回 Village</span>}
               {multiplayer.spawnProtected && <span role="status">重生保護</span>}

@@ -1,46 +1,48 @@
 import {
-  attributeNames,
   isNonNegativeSafeInteger,
   toSimulationTick,
-  type CharacterAggregate,
+  type BagItem,
+  type CharacterCommandCode,
   type CharacterId,
-  type DeathId,
-  type DerivedCombatStats,
   type MapInstanceId,
   type SimulationTick,
 } from '@viesma/domain'
 import { deriveCombatStats, getStarterWeaponModifiers, initialBaseAttributes, type GameData, type NormalizedMap } from '@viesma/game-data'
 import {
+  isApResultCode,
+  isEquipmentResultCode,
   parseAllocateAp,
+  parseEquipmentRequest,
   parsePortalRequest,
   PROTOCOL_VERSION,
-  readApRequestId,
-  type AllocateApRequest,
-  type ApResultCode,
+  readCharacterRequestId,
+  type CharacterRequestHeader,
+  type InventoryItemView,
   type MapRoomJoin,
   type MapRoomSession,
   type OnlineMapId,
+  type OwnerInventory,
   type OwnerProgression,
   type PortalRequest,
   type TransferFailure,
   type TransferOffer,
 } from '@viesma/protocol'
 import {
-  allocateAttributes,
   allocateSoloExperience,
   canUseGroundedInteraction,
-  createCharacterAggregate,
   createFixedTickDriver,
   findOverlappingPortal,
-  grantExperience,
   maxCatchUpTicks,
+  parseInventoryGrant,
   placePlayerAtSpawn,
   respawnPlayer,
   ticksPerSecond,
   type EncounterRewardIntent,
+  type InventoryGrant,
   type MonotonicClock,
   type PartyMembership,
 } from '@viesma/simulation'
+import { createCharacterCoordinator, makeCharacterRequest, type CharacterRequest } from './character-coordinator.ts'
 import { createEncounterRewardWorker, type EncounterRewardPort } from './encounter-reward-worker.ts'
 import { createMapRuntime, type MapRuntime } from './map-runtime.ts'
 import { getMonsterSpawnDefinitions } from './monster-spawns.ts'
@@ -64,23 +66,23 @@ export interface RoomPeer {
   readonly offer: (offer: TransferOffer) => void
   readonly failed: (failure: TransferFailure) => void
   readonly progression?: (snapshot: OwnerProgression) => void
+  readonly inventory?: (snapshot: OwnerInventory) => void
   readonly close: () => void
 }
 
-interface CharacterProgression {
-  aggregate: CharacterAggregate
-  stats: DerivedCombatStats
-  readonly grantedDeaths: Set<DeathId>
-}
-
-interface ApCommand {
-  readonly request: AllocateApRequest
-  result?: ApResultCode
-}
+type CharacterCommand =
+  | { readonly kind: 'request'; readonly header: CharacterRequestHeader; readonly request: CharacterRequest }
+  | {
+      readonly kind: 'grant'
+      readonly grantId: string
+      readonly grant: InventoryGrant
+      readonly complete: (code: CharacterCommandCode) => void
+    }
 
 interface CharacterRoute {
   readonly characterId: CharacterId
-  readonly progression: CharacterProgression
+  readonly commands: CharacterCommand[]
+  lastCommandId: number
   reconnectToken: string
   unconfirmedToken: string | undefined
   room: MapRuntime
@@ -89,7 +91,6 @@ interface CharacterRoute {
   lastPortalRequestId: number
   portal: PortalRequest | undefined
   transfer: Transfer | undefined
-  apCommand?: ApCommand
   nextRespawnMilliseconds: number
 }
 
@@ -138,17 +139,22 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     throw new RangeError('M3.4 requires the M1 and Village maps and their development spawns')
   const maps = { m1, village }
   const spawns = { m1: m1Spawn, village: villageSpawn }
-  const starterModifiers = getStarterWeaponModifiers(data)
-  const starterStats = deriveCombatStats(1, initialBaseAttributes, starterModifiers)
+  const starterStats = deriveCombatStats(1, initialBaseAttributes, getStarterWeaponModifiers(data))
   const monsterSpawns = {
     m1: { definitions: getMonsterSpawnDefinitions(data, m1), maxActive: data.world.maxMonstersPerMap },
     village: { definitions: getMonsterSpawnDefinitions(data, village), maxActive: data.world.maxMonstersPerMap },
   }
 
   const { clock, schedule, nextId, onBacklog, createDestination } = dependencies
+  const characters = createCharacterCoordinator(data, (characterId, stats) => {
+    routes.get(characterId)?.room.updatePlayerMaxima(characterId, stats)
+  })
   const rewards = createEncounterRewardWorker(dependencies.rewardPort, prepareSoloReward)
   const combat = {
-    playerStats: (characterId: CharacterId) => routes.get(characterId)?.progression.stats ?? starterStats,
+    playerStats: (characterId: CharacterId) => {
+      const character = characters.read(characterId)
+      return character ? characters.stats(character) : starterStats
+    },
     balanceVersion: data.balanceVersion,
     rewards,
     ...(dependencies.partyMembership && { partyMembership: dependencies.partyMembership }),
@@ -173,40 +179,26 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
   const canAdmit = () => backlogTicks === 0 && !catchingUp
   const registered = (room: MapRuntime) => rooms.get(room.mapInstanceId) === room
 
-  function commitProgression(progression: CharacterProgression, aggregate: CharacterAggregate, stats: DerivedCombatStats): void {
-    progression.aggregate = aggregate
-    progression.stats = stats
-    routes.get(aggregate.characterId)?.room.updatePlayerMaxima(aggregate.characterId, stats)
-  }
-
   function prepareSoloReward({ claim, groups }: EncounterRewardIntent) {
     const { deathId, mapId, spawnId } = claim
     const definitions = mapId === maps.m1.id ? monsterSpawns.m1.definitions : monsterSpawns.village.definitions
     const baseExp = definitions.find((spawn) => spawn.spawnId === spawnId)?.baseExp
     const grants = allocateSoloExperience(baseExp ?? 0, groups).flatMap(({ characterId, exp }) => {
-      const progression = routes.get(characterId)?.progression
-      return progression ? [{ progression, exp }] : []
+      const commit = routes.has(characterId) && characters.retainExperience(characterId, deathId, exp)
+      return commit ? [commit] : []
     })
-    // 保留死亡時已接受的授予目標，來源房與目前綁定可在 receipt 到達前消失。
-    return () => {
-      const changes = grants.flatMap(({ progression, exp }) => {
-        if (progression.grantedDeaths.has(deathId)) return []
-        const aggregate = grantExperience(progression.aggregate, exp, data.progression)
-        if (aggregate === progression.aggregate) return []
-        const stats = deriveCombatStats(aggregate.level, aggregate.baseAttributes, starterModifiers)
-        return [{ progression, aggregate, stats }]
-      })
-      for (const { progression, aggregate, stats } of changes) {
-        commitProgression(progression, aggregate, stats)
-        if (aggregate.level === data.progression.levelCap) progression.grantedDeaths.clear()
-        else progression.grantedDeaths.add(deathId)
-      }
-      return Object.freeze(changes.map(({ aggregate: { characterId, version } }) => Object.freeze({ characterId, version })))
-    }
+    return () =>
+      Object.freeze(
+        grants.flatMap((commit) => {
+          const version = commit()
+          return version ? [version] : []
+        })
+      )
   }
 
   function progressionSnapshot(route: CharacterRoute, binding: MapRoomJoin, result?: OwnerProgression['result']): OwnerProgression {
-    const { aggregate, stats } = route.progression
+    const aggregate = characters.read(route.characterId)
+    if (!aggregate) throw new Error('Missing active character')
     const { version, level, expWithinLevel, unspentAp, baseAttributes } = aggregate
     return {
       ...binding,
@@ -217,49 +209,128 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
       nextLevelExp: data.progression.expToNextLevel[level - 1] ?? null,
       unspentAp,
       baseAttributes,
-      stats,
+      stats: characters.stats(aggregate),
       ...(result && { result }),
     }
   }
 
-  function reportAp(route: CharacterRoute, binding: MapRoomJoin, requestId: number, code: ApResultCode): void {
-    try {
-      route.peer?.progression?.(progressionSnapshot(route, binding, { requestId, code }))
-    } catch {
-      // 結案已留存；重送或重連可取得權威快照。
+  function inventorySnapshot(route: CharacterRoute, binding: MapRoomJoin, result?: OwnerInventory['result']): OwnerInventory {
+    const character = characters.read(route.characterId)
+    if (!character) throw new Error('Missing active character')
+    const { bag, equipment, currency } = character.inventory
+    function view(item: BagItem | null): InventoryItemView | null {
+      if (!item) return null
+      const { itemDefinitionId, quantity } = item
+      return item.kind === 'equipment'
+        ? { itemDefinitionId, quantity, itemInstanceId: item.itemInstanceId }
+        : { itemDefinitionId, quantity }
+    }
+    return {
+      ...binding,
+      protocolVersion: PROTOCOL_VERSION,
+      characterVersion: character.version,
+      bag: bag.map(view),
+      currency,
+      equipment: { weapon: view(equipment.weapon), armor: view(equipment.armor), accessory: view(equipment.accessory) },
+      ...(result && { result }),
     }
   }
 
-  function matchesBinding(binding: MapRoomJoin, request: AllocateApRequest): boolean {
+  function reportCommand(
+    route: CharacterRoute,
+    binding: MapRoomJoin,
+    kind: 'ap' | 'equipment',
+    requestId: number,
+    code: CharacterCommandCode,
+    requestEpoch?: string
+  ): void {
+    const identity = { requestId, ...(requestEpoch !== undefined && { requestEpoch }) }
+    try {
+      if (kind === 'ap' && isApResultCode(code)) route.peer?.progression?.(progressionSnapshot(route, binding, { ...identity, code }))
+      if (kind === 'equipment' && isEquipmentResultCode(code))
+        route.peer?.inventory?.(inventorySnapshot(route, binding, { ...identity, code }))
+    } catch {
+      // 收據與角色狀態已提交，下一次重送可讀取目前快照。
+    }
+  }
+
+  function matchesBinding(binding: MapRoomJoin, request: CharacterRequestHeader): boolean {
     return request.connectionEpoch === binding.connectionEpoch && request.mapEpoch === binding.mapEpoch
   }
 
-  function canAllocateAp(route: CharacterRoute): boolean {
+  function canMutate(route: CharacterRoute, kind: 'ap' | 'equipment'): boolean {
     const body = route.room.player(route.characterId)
-    return !route.transfer && body !== undefined && body.action.kind !== 'death' && body.vitals.hp > 0
+    return (
+      !route.transfer &&
+      body !== undefined &&
+      body.action.kind !== 'death' &&
+      body.vitals.hp > 0 &&
+      (kind === 'ap' || canUseGroundedInteraction(body))
+    )
   }
 
-  function advanceAp(route: CharacterRoute): void {
-    const { peer, room, apCommand, progression } = route
-    if (!peer || !apCommand || apCommand.result) return
-    const binding = room.binding(peer.connection)
-    const { request } = apCommand
-    if (!binding || !matchesBinding(binding, request)) return
-
-    function allocate(): ApResultCode {
-      if (!canAllocateAp(route)) return 'UNAVAILABLE'
-      if (request.expectedCharacterVersion !== progression.aggregate.version) return 'STALE_VERSION'
-      const result = allocateAttributes(progression.aggregate, request.deltas)
-      if ('code' in result) return result.code
-      if (result.character !== progression.aggregate) {
-        const { level, baseAttributes } = result.character
-        commitProgression(progression, result.character, deriveCombatStats(level, baseAttributes, starterModifiers))
+  function advanceCommands(route: CharacterRoute): void {
+    for (const command of route.commands.splice(0)) {
+      if (command.kind === 'grant') {
+        try {
+          command.complete(characters.insert(route.characterId, command.grantId, command.grant))
+        } catch {
+          command.complete('BUSY')
+        }
+        continue
       }
-      return 'CONFIRMED'
+      const binding = route.peer && route.room.binding(route.peer.connection)
+      if (!binding || !matchesBinding(binding, command.header)) continue
+      const { header, request } = command
+      const kind = request.operation.kind === 'ap' ? 'ap' : 'equipment'
+      let code: CharacterCommandCode
+      try {
+        code = characters.execute(route.characterId, request, canMutate(route, kind))
+      } catch {
+        code = 'BUSY'
+      }
+      reportCommand(route, binding, kind, header.requestId, code, header.requestEpoch)
     }
+  }
 
-    apCommand.result = allocate()
-    reportAp(route, binding, request.requestId, apCommand.result)
+  function requestCommand(room: MapRuntime, connection: object, payload: unknown, kind: 'ap' | 'equipment'): void {
+    const route = connections.get(connection)
+    const binding = route?.room === room ? room.binding(connection) : undefined
+    const requestId = readCharacterRequestId(payload)
+    if (!route || !binding || requestId === undefined) return
+    const header = kind === 'ap' ? parseAllocateAp(payload) : parseEquipmentRequest(payload)
+    const report = (code: CharacterCommandCode) => reportCommand(route, binding, kind, requestId, code, header?.requestEpoch)
+    if (!header) return report(kind === 'ap' ? 'INVALID_ALLOCATION' : 'INVALID_ITEM')
+    if (!matchesBinding(binding, header)) return report('STALE_BINDING')
+
+    const scope = header.requestEpoch ?? header.connectionEpoch
+    const operation = 'deltas' in header ? { kind: 'ap' as const, deltas: header.deltas } : header
+    const request = makeCharacterRequest(scope, requestId, header.expectedCharacterVersion, operation)
+    const receipt = characters.replay(route.characterId, request.key, request.fingerprint)
+    if (receipt) {
+      // 保留舊 AP 呼叫對已汰換失敗請求的回覆。顯式重送始終依原始收據結案。
+      return report(
+        header.requestEpoch === undefined &&
+          kind === 'ap' &&
+          requestId < route.lastCommandId &&
+          receipt !== 'CONFIRMED' &&
+          receipt !== 'REQUEST_CONFLICT'
+          ? 'STALE_REQUEST'
+          : receipt
+      )
+    }
+    const existing = route.commands.find((command) => command.kind === 'request' && command.request.key === request.key)
+    if (existing?.kind === 'request') {
+      if (existing.request.fingerprint !== request.fingerprint) report('REQUEST_CONFLICT')
+      return
+    }
+    if (scope !== binding.connectionEpoch || requestId < route.lastCommandId) return report('STALE_REQUEST')
+    if (route.commands.some((command) => command.kind === 'request' && (command.request.operation.kind === 'ap') === (kind === 'ap'))) {
+      return report('BUSY')
+    }
+    route.lastCommandId = requestId
+    route.commands.push({ kind: 'request', header, request })
+    clearUnconfirmedToken(route)
   }
 
   function clearTransfer(route: CharacterRoute, reservationConsumed = false) {
@@ -370,6 +441,7 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     route.room = destination
     route.peer = candidate
     route.lastPortalRequestId = -1
+    route.lastCommandId = -1
     connections.set(candidate.connection, route)
     clearTransfer(route, true)
     notifyJoined(route, candidate, binding)
@@ -463,7 +535,7 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
         rewards.advance()
         for (const route of routes.values()) {
           advanceRoute(route, frame.tick, wakeMilliseconds)
-          advanceAp(route)
+          advanceCommands(route)
         }
         for (const id of [...rooms.keys()].sort()) rooms.get(id)?.advance(frame, wakeMilliseconds)
         tick = frame.tick
@@ -498,6 +570,8 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
   function removeRoute(route: CharacterRoute) {
     const transfer = clearTransfer(route)
     routes.delete(route.characterId)
+    characters.release(route.characterId)
+    for (const command of route.commands.splice(0)) if (command.kind === 'grant') command.complete('UNAVAILABLE')
     reconnectTokens.delete(route.reconnectToken)
     clearUnconfirmedToken(route)
     if (route.peer) {
@@ -548,10 +622,12 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
       const binding = room.join(peer.connection, clock.nowMilliseconds())
       if (!binding) return false
       const characterId = binding.characterId as CharacterId
+      characters.open(characterId)
       const reconnectToken = nextId()
       const route: CharacterRoute = {
         characterId,
-        progression: { aggregate: createCharacterAggregate(characterId), stats: starterStats, grantedDeaths: new Set() },
+        commands: [],
+        lastCommandId: -1,
         room,
         peer,
         reconnectToken,
@@ -621,6 +697,7 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
       route.peer = peer
       route.reconnectUntil = undefined
       route.lastPortalRequestId = -1
+      route.lastCommandId = -1
       connections.set(peer.connection, route)
       notifyJoined(route, peer, binding)
       return true
@@ -644,38 +721,31 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
       return true
     },
     requestAp(room: MapRuntime, connection: object, payload: unknown): void {
-      const route = connections.get(connection)
-      const binding = route?.room === room ? room.binding(connection) : undefined
-      const requestId = readApRequestId(payload)
-      if (!route || !binding || requestId === undefined) return
-      const request = parseAllocateAp(payload)
-      if (!request) return reportAp(route, binding, requestId, 'INVALID_ALLOCATION')
-      if (!matchesBinding(binding, request)) return reportAp(route, binding, requestId, 'STALE_BINDING')
-
-      const latest = route.apCommand
-      if (latest && matchesBinding(binding, latest.request)) {
-        if (requestId < latest.request.requestId) return reportAp(route, binding, requestId, 'STALE_REQUEST')
-        if (requestId === latest.request.requestId) {
-          const same =
-            latest.request.expectedCharacterVersion === request.expectedCharacterVersion &&
-            attributeNames.every((name) => latest.request.deltas[name] === request.deltas[name])
-          if (!same) return reportAp(route, binding, requestId, 'REQUEST_CONFLICT')
-          if (latest.result) reportAp(route, binding, requestId, latest.result)
-          return
-        }
-        if (!latest.result) return reportAp(route, binding, requestId, 'BUSY')
-      }
-      if (!canAllocateAp(route)) {
-        route.apCommand = { request, result: 'UNAVAILABLE' }
-        return reportAp(route, binding, requestId, 'UNAVAILABLE')
-      }
-      route.apCommand = { request }
-      clearUnconfirmedToken(route)
+      requestCommand(room, connection, payload, 'ap')
+    },
+    requestEquipment(room: MapRuntime, connection: object, payload: unknown): void {
+      requestCommand(room, connection, payload, 'equipment')
+    },
+    queueInventoryGrant(characterId: CharacterId, grantId: string, grant: InventoryGrant): Promise<CharacterCommandCode> {
+      const route = routes.get(characterId)
+      if (!route) return Promise.resolve('UNAVAILABLE')
+      const normalized = parseInventoryGrant(grant)
+      if (!normalized) return Promise.resolve('INVALID_ITEM')
+      return new Promise((complete) => {
+        route.commands.push({ kind: 'grant', grantId, grant: normalized, complete })
+      })
     },
     progression(room: MapRuntime, connection: object, afterVersion = -1): OwnerProgression | undefined {
       const route = connections.get(connection)
       const binding = route?.room === room ? room.binding(connection) : undefined
-      if (route && binding && route.progression.aggregate.version > afterVersion) return progressionSnapshot(route, binding)
+      const character = route && characters.read(route.characterId)
+      if (route && binding && character && character.version > afterVersion) return progressionSnapshot(route, binding)
+    },
+    inventory(room: MapRuntime, connection: object, afterVersion = -1): OwnerInventory | undefined {
+      const route = connections.get(connection)
+      const binding = route?.room === room ? room.binding(connection) : undefined
+      const character = route && characters.read(route.characterId)
+      if (route && binding && character && character.version > afterVersion) return inventorySnapshot(route, binding)
     },
     cancelTransfer(room: MapRuntime, connection: object, ticket: string): void {
       const route = connections.get(connection)

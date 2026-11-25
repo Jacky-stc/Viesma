@@ -317,6 +317,79 @@ body {
   cursor: default;
 }
 
+.inventory-panel {
+  width: min(38rem, 94vw);
+  max-height: 88dvh;
+  overflow: auto;
+}
+
+.inventory-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(8.75rem, 2fr);
+  gap: 0.75rem;
+}
+
+.inventory-layout h3 {
+  margin-block: 0.5rem 0.25rem;
+  font-size: 1rem;
+}
+
+.inventory-bag,
+.inventory-equipped {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inventory-bag {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.inventory-bag button,
+.inventory-equipped button {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.125rem 0.25rem;
+  overflow-wrap: anywhere;
+  font-size: 0.75rem;
+}
+
+.inventory-bag button {
+  display: grid;
+  height: 3rem;
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: center;
+  overflow: hidden;
+  line-height: 1.1;
+}
+
+.inventory-bag button span {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.inventory-bag small {
+  display: block;
+}
+
+.inventory-layout button[aria-pressed='true'] {
+  border-color: #ffcc89;
+  color: #ffcc89;
+}
+
+.inventory-layout button:disabled {
+  opacity: 0.6;
+}
+
+.inventory-details p,
+.inventory-layout [role='status'] {
+  margin-block: 0.25rem;
+}
+
 @media (any-pointer: coarse) and (orientation: landscape) {
   .playground-touch:not([hidden]) {
     display: flex;

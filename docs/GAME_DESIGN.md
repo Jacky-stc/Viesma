@@ -269,10 +269,11 @@ Loot recipients **與 EXP 使用同一 death-time eligible set**，但不按 gro
 
 ## 8. Inventory、equipment 與 consumables
 
-- 24 slots，slot index 0..23；currency 獨立 purse；equipment slots 固定 `Weapon`、`Armor`、`Accessory`，各一件且不占 bag slots。
+- 24 slots，slot index 0..23；currency 獨立 purse，範圍 0..2147483647；equipment slots 固定 `Weapon`、`Armor`、`Accessory`，各一件且不占 bag slots。
 - Consumables／materials 每 stack 最多99，只有相同 itemDefinitionId 與完全相同 metadata 才能合併；equipment quantity=1，使用唯一 `itemInstanceId`，永不 stack。
+- Metadata 為最多 16 個欄位的平面資料，欄名 1 至 64 字元，值為 null、布林、安全整數或最多 256 字元的字串。欄位順序不影響堆疊相容性。現有物品預設使用空 metadata；所有現有裝備階層均適用 Beginner。
 - Pickup 先按 slot index 填滿既有 stacks，再依序使用空格；預先算完所需容量才 mutation。不能用移動多餘數量到不存在 slot 的方式超出容量。
-- Equip 驗證 ownership、Beginner 可用、requiredLevel、slot type、alive；slot 已有裝備時，舊裝備放回新裝備原 bag slot，因此滿包亦可原子交換。
+- Equip／unequip 驗證目前綁定與版本，沿用活著、接地、未處於其他動作且未掉出地圖的互動條件。轉場期間拒絕新裝備請求。Equip 另驗證 ownership、Beginner 可用、requiredLevel 與 slot type。槽位已有裝備時，舊裝備放回新裝備原 bag slot，因此滿包亦可原子交換。
 - Unequip 需要至少一個空 bag slot；滿包時全數拒絕。Derived stats 重算，HP／MP 只 clamp，不補滿。
 - Consume 在角色 command admission 當下驗證 alive、數值未滿、item 與 cooldown，先保留這次使用的 cooldown，防止並行重複使用。Transaction 從指定 slot／itemInstanceId 減1並記錄唯一 heal effect；commit 後下一 tick 套用一次 restore。失敗 rollback 時釋放保留，不減量。
 - 已接受的使用若在 DB commit 回覆前遭遇致命傷害，物品仍按成功使用消耗，heal effect 標為已處理但不復活；不回溯 combat。此時顯示「使用完成，角色已死亡」，不能顯示已恢復 HP。這是非同步 transaction 的明確 MVP 預設，M7.4 必須測試；角色已 Death 時送出的新 consume 則直接拒絕。

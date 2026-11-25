@@ -9,6 +9,16 @@ export {
 export { createFixedTickDriver, fixedDeltaSeconds, maxCatchUpTicks, ticksPerSecond } from './fixed-tick.js'
 export type { FixedTick, FixedTickAdvance, FixedTickDriver, MonotonicClock } from './fixed-tick.js'
 export {
+  changeCurrency,
+  changeEquipment,
+  createStarterInventory,
+  equipmentInstances,
+  insertInventory,
+  isValidInventory,
+  parseInventoryGrant,
+  type InventoryGrant,
+} from './inventory.js'
+export {
   canUseGroundedInteraction,
   createLocalWorld,
   findOverlappingPortal,

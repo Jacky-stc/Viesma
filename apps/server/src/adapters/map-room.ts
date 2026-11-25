@@ -5,11 +5,13 @@ import {
   cancelTransferMessage,
   checkJoinVersion,
   combatDamageMessage,
+  equipmentMessage,
   inputFrameMessage,
   interactPortalMessage,
   mapRoomJoinedMessage,
   mapRoomName,
   movementCheckpointMessage,
+  ownerInventoryMessage,
   ownerProgressionMessage,
   parseMapAdmission,
   parseTransferCancellation,
@@ -41,6 +43,7 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
     #runtime: MapRuntime | undefined
     #combatReady = new WeakSet<Client>()
     #progressionVersion = new WeakMap<Client, number>()
+    #inventoryVersion = new WeakMap<Client, number>()
 
     onCreate(): void {
       const runtime = world.createRoom(mapId, this.roomId)
@@ -57,6 +60,9 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
       })
       this.onMessage(allocateApMessage, (client, payload: unknown) => {
         if (this.clients.getById(client.sessionId) === client) world.requestAp(runtime, client, payload)
+      })
+      this.onMessage(equipmentMessage, (client, payload: unknown) => {
+        if (this.clients.getById(client.sessionId) === client) world.requestEquipment(runtime, client, payload)
       })
       this.onMessage(cancelTransferMessage, (client, payload: unknown) => {
         const ticket = parseTransferCancellation(payload)
@@ -83,6 +89,10 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
         progression: (snapshot) => {
           client.send(ownerProgressionMessage, snapshot)
           this.#progressionVersion.set(client, snapshot.characterVersion)
+        },
+        inventory: (snapshot) => {
+          client.send(ownerInventoryMessage, snapshot)
+          this.#inventoryVersion.set(client, snapshot.characterVersion)
         },
         close: () => {
           if (this.clients.getById(client.sessionId) === client) this.kickClient(client.sessionId)
@@ -135,6 +145,11 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
         if (progression) {
           client.send(ownerProgressionMessage, progression, { afterNextPatch: true })
           this.#progressionVersion.set(client, progression.characterVersion)
+        }
+        const inventory = world.inventory(runtime, client, this.#inventoryVersion.get(client))
+        if (inventory) {
+          client.send(ownerInventoryMessage, inventory, { afterNextPatch: true })
+          this.#inventoryVersion.set(client, inventory.characterVersion)
         }
         if (combatDamage && this.#combatReady.has(client)) {
           client.send(combatDamageMessage, combatDamage, { afterNextPatch: true })

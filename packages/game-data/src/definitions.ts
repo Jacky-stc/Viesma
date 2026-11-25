@@ -1,4 +1,5 @@
 import type { ItemDefinitionId } from '@viesma/domain'
+import { stackableItemLimit } from '@viesma/domain'
 import {
   equipmentSlots,
   modifierStats,
@@ -28,7 +29,6 @@ import {
   uniqueBy,
 } from './validation.js'
 
-export const stackableItemLimit = 99
 const maxStatModifier = 1_000_000
 
 function parseModifiers(input: unknown, path: string): EquipmentModifiers {

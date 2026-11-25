@@ -1,4 +1,4 @@
-import type { ItemDefinitionId, LootEntryId, MapId } from '@viesma/domain'
+import type { EquipmentSlot, ItemDefinitionId, LootEntryId, MapId } from '@viesma/domain'
 import type { NormalizedMap } from './tiled/types.js'
 
 export const GAME_DATA_SCHEMA_VERSION = 1
@@ -12,8 +12,7 @@ export type PortalId = ContentId<'Portal'>
 export type SpawnId = ContentId<'Spawn'>
 export type LootTableId = ContentId<'LootTable'>
 
-export const equipmentSlots = ['weapon', 'armor', 'accessory'] as const
-export type EquipmentSlot = (typeof equipmentSlots)[number]
+export { equipmentSlots, type EquipmentSlot } from '@viesma/domain'
 
 export const modifierStats = [
   'str',

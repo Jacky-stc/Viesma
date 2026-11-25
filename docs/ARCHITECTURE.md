@@ -106,7 +106,7 @@ M0.2 建立 `domain`、`physics`、`simulation`、`protocol` 與 `network-colyse
 | Combat validation／damage contribution    | Server combat step；encounter-local ledger                                                                                  | 送 attack input，播放已確認結果                        |
 | Party membership／leader／invite          | Process-global PartyService，獨立於 map                                                                                     | UI／command；map transition 不重建 party               |
 | Eligibility／group pool／EXP／loot roll   | Server reward snapshot＋pure policy＋reward worker                                                                          | 只顯示 owner 的結果                                    |
-| Level／AP／base attributes／currency      | M5.1 成長由 WorldCoordinator 持有。後續 economy 由 CharacterCoordinator 排序，MVP-B commit 後的 PostgreSQL 為 durable truth | 用 private snapshot 顯示，送意圖                       |
+| Level／AP／base attributes／currency      | CharacterCoordinator 按角色序列化寫入，MVP-B commit 後的 PostgreSQL 為 durable truth | 用 private snapshot 顯示，送意圖                       |
 | Bag／equipment／pickup／consume／purchase | CharacterCoordinator＋InventoryRepository transaction                                                                       | 不能樂觀修改已確認 inventory 或餘額                    |
 | Persistent character record               | PostgreSQL；只有 repository adapter 寫入                                                                                    | HTTP selection 或 owner-only snapshot                  |
 | Camera／animation／touch／HUD             | Client                                                                                                                      | 不影響 collision 或 economy                            |
@@ -214,6 +214,7 @@ Input seq 在 connection epoch 內單調遞增。Server 拒絕舊 epoch、已見
 - **Owner-only messages**：character／bag／equipment snapshot、loot snapshot／delta、request result、reward receipt。`privateRevision` 不連續時重新要求完整 snapshot；重新入房／重連一定重建完整 owner view。
 - **購買結果（M5.6）**。只有本人收到帶 requestId 的 pending／拒絕／已提交結果。成功後用同一角色版本回報餘額與 bag 更新，換圖或重連由完整 owner view 恢復。
 - **M5.1（protocol 5）**。`OwnerProgression` 綁定 `characterId`、`connectionEpoch` 與 `mapEpoch`，在入房／重連及角色版本變更時傳送全量進度，可附 AP 請求的結案碼。較舊版本的快照不得覆寫已確認資料。
+- **M5.3（protocol 6）**。`OwnerInventory` 沿用同一綁定與 characterVersion，傳送本人全量 bag、equipment、currency，可附裝備操作結案。裝備指令包含來源物品身分與預期版本。AP 與裝備重送以原請求 epoch 和 requestId 識別，傳送時須附目前連線和地圖 epoch。
 - **Party-only messages**：PartyService 對所有 connected members 發送 revisioned full snapshot，包含同／跨 map 的 member 摘要。不同 party 收不到 invite／roster 私有資料。
 
 Personal loot／inventory **不放 public room Schema**；預設用 server 指定 client 的 reliable messages，靠完整 private snapshot 修復斷線，而不是只在畫面過濾。將來若用 StateView 也須有 payload isolation tests；不是目前必需依賴。
@@ -269,7 +270,7 @@ M4.3 將 first-hit lock、角色累計傷害、最近傷害 tick 與已使用的
 
 M4.4 同一固定 tick 驗證 receipt 的 deathId、monsterId、generation 與 encounterId。確認 tick C 進入 Dead，C + 30 進入 RespawnWait，C + 330 於原 spawn 以新 monsterId、遞增 generation 與新 encounterId 進入 Spawning，下一 tick 進入 Patrol。前一世代接受的 swing 不會命中新世代。房間銷毀只釋放對 receipt 的保留，原工作仍由 world worker 完成。
 
-M5.1 的匿名角色由 WorldCoordinator 持有一份記憶體成長 aggregate，入房時建立，換圖與保留席位期間的重連沿用同一份。Reward worker 收下凍結意圖時保留單人授予目標。記憶體 port receipt 通過身分驗證後，在固定 tick 內先套用單人 EXP 並更新版本，再完成 encounter receipt。AP 在同一世界 tick 內、交接判定後與戰鬥步進前處理，使用當下的版本和角色狀態。請求 ID 在目前連線 epoch 內遞增，最近一次結案可重送，同 ID 變更內容須拒絕。完整的 EXP 與 ground grants 交易及故障驗證屬 M5.5。
+每個 WorldCoordinator 使用一個跨房間的 CharacterCoordinator 管理匿名角色的記憶體進度、背包、裝備、purse 與收據。WorldCoordinator 驗證 socket／map 綁定與即時角色互動狀態。固定 tick 依序接受 reward completion、處理交接、執行玩家 mutation、步進戰鬥。Reward worker 保留凍結的單人授予目標至 EXP 收據提交。記憶體比較版本後，在同一同步執行回合提交角色狀態與收據。回覆重送時保留原結案及其版本，快照取當前角色版本。跨 epoch 的請求只可查回已存在的收據。完整的 EXP 與 ground grants 交易及故障驗證屬 M5.5。
 
 M5.2 的 server-only 記憶體 adapter 接受凍結的 `EncounterRewardIntent`，以死亡地圖與 spawn ID 從同版本的已驗證資料取得怪物階級及掉落表。每個 owner／entry 的 roll 以 server secret、deathId、ownerCharacterId、tableEntryId 和 stream counter 派生。Pending grant 保留物品定義 ID／數量或貨幣金額、balanceVersion、來源地圖／instance 與死亡座標。Death settlement 成功寫入記憶體時，以 UTC wall clock 設定原始到期時間，按 deathId 取得原 receipt。Grant ID 以 deathId、ownerCharacterId 和 tableEntryId 編碼。M5.4 負責最終安全座標、delivery instance、可見性及拾取。M5.5 將此結算契約接入現行 reward worker，並把到期時間錨定在 EXP 與 ground grants 的同一次原子提交。
 
@@ -291,6 +292,8 @@ DB 暫不可用時 bounded retry 同一 intent，保留結算中狀態，economy
 ## 8. Persistence model 與 transaction boundaries
 
 M5.3 後的 [PostgreSQL 契約 spike](ROADMAP.md#postgresql-契約-spikem53-後) 使用可拋棄的真資料庫試驗既有 InventoryRepository 及 transaction 語意。正式 schema、Drizzle migrations 與 adapters 自 M7.1 交付。M7.1 依賴 M6.4 定義的 frozen death snapshot、多人 grants／receipts 及 personal ground grants，以便驗證正式資料約束與 parity。
+
+M5.3 的 InventoryRepository 先讀同角色的 receipt key 與 canonical payload fingerprint，再比對預期版本，最後提交角色變更與結案。成功變更使版本加一。無變更的成功或業務拒絕保留版本。收據帶原結果版本，回覆中的全量快照使用當前版本。記憶體 adapter 同步提交，因此 tick 可直接投影結果。PG spike 須驗證同一契約改為非同步 transaction 後，如何按角色排隊、處理 COMMIT 結果不明，並將已提交版本交回固定 tick 投影。
 
 ### 8.1 初始 logical schema
 

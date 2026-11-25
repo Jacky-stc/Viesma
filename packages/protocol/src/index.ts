@@ -5,6 +5,15 @@ export {
   type CombatDamage,
   type CombatDamageBatch,
 } from './combat-damage.js'
+export {
+  isEquipmentResultCode,
+  parseEquipmentRequest,
+  parseOwnerInventory,
+  type EquipmentRequest,
+  type EquipmentResultCode,
+  type InventoryItemView,
+  type OwnerInventory,
+} from './inventory.js'
 export { PROTOCOL_VERSION, checkJoinVersion, type JoinVersion, type JoinVersionResult } from './join-version.js'
 export { parseInputFrame, parseMapRoomJoin } from './map-room.js'
 export type { InputFrame, MapRoomJoin, PublicMapRoom, PublicMonster, PublicPlayer, PublicRoomHeader } from './map-room.js'
@@ -24,11 +33,13 @@ export {
 } from './map-travel.js'
 export { parseMovementCheckpoint, type MovementCheckpoint } from './movement-checkpoint.js'
 export {
+  isApResultCode,
   parseAllocateAp,
   parseOwnerProgression,
-  readApRequestId,
+  readCharacterRequestId,
   type AllocateApRequest,
   type ApResultCode,
+  type CharacterRequestHeader,
   type OwnerProgression,
 } from './progression.js'
 
@@ -42,5 +53,8 @@ export const interactPortalMessage = 'InteractPortal'
 export const transferOfferMessage = 'TransferOffer'
 export const transferFailureMessage = 'TransferFailure'
 export const cancelTransferMessage = 'CancelTransfer'
+
+export const equipmentMessage = 'ChangeEquipment'
+export const ownerInventoryMessage = 'OwnerInventory'
 export const allocateApMessage = 'AllocateAP'
 export const ownerProgressionMessage = 'OwnerProgression'

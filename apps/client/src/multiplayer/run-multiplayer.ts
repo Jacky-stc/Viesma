@@ -1,28 +1,41 @@
 import { Client, type Room } from '@colyseus/sdk'
-import { toSimulationTick, type Attributes } from '@viesma/domain'
-import { initialPhysicsBalance, loadGrayboxGameData, serializeMapManifest, type NormalizedMap } from '@viesma/game-data'
+import { toSimulationTick, type Attributes, type EquipmentOperation } from '@viesma/domain'
+import {
+  initialPhysicsBalance,
+  loadGrayboxGameData,
+  serializeMapManifest,
+  type ItemDefinition,
+  type NormalizedMap,
+} from '@viesma/game-data'
 import { MapRoomSchema, readPublicMonsters, readPublicPlayers, type MapRoomState } from '@viesma/network-colyseus'
 import {
   allocateApMessage,
   cancelTransferMessage,
   combatDamageMessage,
+  equipmentMessage,
   inputFrameMessage,
   interactPortalMessage,
   mapRoomJoinedMessage,
   mapRoomName,
   movementCheckpointMessage,
+  ownerInventoryMessage,
   ownerProgressionMessage,
   parseMapRoomSession,
   parseMovementCheckpoint,
+  parseOwnerInventory,
   parseOwnerProgression,
   parseTransferFailure,
   parseTransferOffer,
   PROTOCOL_VERSION,
   transferFailureMessage,
   transferOfferMessage,
+  type AllocateApRequest,
   type ApResultCode,
+  type EquipmentRequest,
+  type EquipmentResultCode,
   type MapRoomSession,
   type OnlineMapId,
+  type OwnerInventory,
   type OwnerProgression,
   type PublicPlayer,
   type TransferOffer,
@@ -46,6 +59,10 @@ export type MultiplayerPresentation = Pick<PublicPlayer, 'hp' | 'maxHp' | 'state
   readonly players: number
   readonly mapName: string
   readonly progression: OwnerProgression | undefined
+  readonly inventory: OwnerInventory | undefined
+  readonly items: readonly ItemDefinition[]
+  readonly equipmentStatus: 'PENDING' | EquipmentResultCode | undefined
+  readonly changeEquipment: (operation: EquipmentOperation, snapshot: OwnerInventory) => boolean
   readonly apStatus: 'PENDING' | ApResultCode | undefined
   readonly allocateAp: (deltas: Attributes, snapshot: OwnerProgression) => boolean
 }
@@ -65,7 +82,9 @@ interface RoomScene {
   readonly combat: ReturnType<typeof createCombatPresentation>
   binding?: MapRoomSession
   progression?: OwnerProgression
-  ap?: { readonly requestId: number; readonly status: 'PENDING' | ApResultCode }
+  inventory?: OwnerInventory
+  apStatus?: 'PENDING' | ApResultCode
+  equipmentStatus?: 'PENDING' | EquipmentResultCode
   prediction?: ReturnType<typeof createLocalPrediction>
   latest?: { self: PublicPlayer; serverTick: number; mapInstanceId: string }
   recoveryTarget?: { readonly requestId: number | null; readonly location: RoomLocation } | undefined
@@ -160,6 +179,7 @@ export async function runMultiplayer(
   publishStatus: (status: string) => void,
   disconnect: () => void,
   toggleApPanel: () => void,
+  toggleInventory: () => void,
   signal: AbortSignal
 ): Promise<void> {
   if (signal.aborted) return
@@ -196,32 +216,55 @@ export async function runMultiplayer(
   let localTick = toSimulationTick(0)
   let sceneRevision = 0
   let latestCharacterVersion = -1
+  let latestInventoryVersion = -1
+  let economyRequestId = 0
+  let pendingAp: AllocateApRequest | undefined
+  let pendingEquipment: EquipmentRequest | undefined
+
+  function canSend(scene: RoomScene, binding: MapRoomSession, snapshot: OwnerProgression | OwnerInventory): boolean {
+    return (
+      !travel &&
+      !recovery &&
+      scene.room.connection.isOpen &&
+      scene.latest?.self.state !== 'death' &&
+      snapshot.connectionEpoch === binding.connectionEpoch &&
+      snapshot.mapEpoch === binding.mapEpoch
+    )
+  }
 
   function allocateAp(deltas: Attributes, snapshot: OwnerProgression): boolean {
     const scene = active
     const binding = scene?.binding
-    if (
-      !scene ||
-      !binding ||
-      travel ||
-      recovery ||
-      !scene.room.connection.isOpen ||
-      scene.latest?.self.state === 'death' ||
-      scene.ap?.status === 'PENDING' ||
-      snapshot.connectionEpoch !== binding.connectionEpoch ||
-      snapshot.mapEpoch !== binding.mapEpoch
-    )
-      return false
-    const requestId = (scene.ap?.requestId ?? 0) + 1
-    scene.ap = { requestId, status: 'PENDING' }
-    scene.room.send(allocateApMessage, {
+    if (!scene || !binding || pendingAp || !canSend(scene, binding, snapshot)) return false
+    pendingAp = {
       protocolVersion: PROTOCOL_VERSION,
       connectionEpoch: binding.connectionEpoch,
       mapEpoch: binding.mapEpoch,
+      requestEpoch: binding.connectionEpoch,
       expectedCharacterVersion: snapshot.characterVersion,
-      requestId,
+      requestId: ++economyRequestId,
       deltas,
-    })
+    }
+    scene.apStatus = 'PENDING'
+    scene.room.send(allocateApMessage, pendingAp)
+    return true
+  }
+
+  function changeEquipment(operation: EquipmentOperation, snapshot: OwnerInventory): boolean {
+    const scene = active
+    const binding = scene?.binding
+    if (!scene || !binding || pendingEquipment || !canSend(scene, binding, snapshot)) return false
+    pendingEquipment = {
+      ...operation,
+      protocolVersion: PROTOCOL_VERSION,
+      connectionEpoch: binding.connectionEpoch,
+      mapEpoch: binding.mapEpoch,
+      requestEpoch: binding.connectionEpoch,
+      expectedCharacterVersion: snapshot.characterVersion,
+      requestId: ++economyRequestId,
+    }
+    scene.equipmentStatus = 'PENDING'
+    scene.room.send(equipmentMessage, pendingEquipment)
     return true
   }
 
@@ -258,6 +301,18 @@ export async function runMultiplayer(
     renderer?.resetRoom()
     clearDiagnostics()
     sceneRevision++
+    const binding = scene.binding
+    if (binding) {
+      const { connectionEpoch, mapEpoch } = binding
+      if (pendingAp && pendingAp.connectionEpoch !== connectionEpoch) {
+        scene.apStatus = 'PENDING'
+        scene.room.send(allocateApMessage, { ...pendingAp, connectionEpoch, mapEpoch })
+      }
+      if (pendingEquipment && pendingEquipment.connectionEpoch !== connectionEpoch) {
+        scene.equipmentStatus = 'PENDING'
+        scene.room.send(equipmentMessage, { ...pendingEquipment, connectionEpoch, mapEpoch })
+      }
+    }
     publishStatus('')
   }
 
@@ -360,6 +415,7 @@ export async function runMultiplayer(
         unbindCheckpoint()
         unbindCombatDamage()
         unbindProgression()
+        unbindInventory()
         unbindOffer()
         unbindFailure()
         room.onStateChange.remove(receiveState)
@@ -434,15 +490,43 @@ export async function runMultiplayer(
         !update ||
         update.characterId !== binding.characterId ||
         update.connectionEpoch !== binding.connectionEpoch ||
-        update.mapEpoch !== binding.mapEpoch ||
-        update.characterVersion < latestCharacterVersion
+        update.mapEpoch !== binding.mapEpoch
       )
         return
-      latestCharacterVersion = update.characterVersion
-      if (scene.progression?.characterVersion !== update.characterVersion) scene.progression = update
+      if (update.characterVersion >= latestCharacterVersion && scene.progression?.characterVersion !== update.characterVersion) {
+        latestCharacterVersion = update.characterVersion
+        scene.progression = update
+      }
       const { result } = update
-      if (result && scene.ap?.status === 'PENDING' && result.requestId === scene.ap.requestId) {
-        scene.ap = { requestId: result.requestId, status: result.code }
+      if (result && pendingAp && result.requestId === pendingAp.requestId && result.requestEpoch === pendingAp.requestEpoch) {
+        pendingAp = undefined
+        scene.apStatus = result.code
+      }
+    })
+    const unbindInventory = room.onMessage(ownerInventoryMessage, (payload: unknown) => {
+      const { binding } = scene
+      if (!isCurrent() || !binding || (recovery && active === scene)) return
+      const update = parseOwnerInventory(payload)
+      if (
+        !update ||
+        update.characterId !== binding.characterId ||
+        update.connectionEpoch !== binding.connectionEpoch ||
+        update.mapEpoch !== binding.mapEpoch
+      )
+        return
+      if (update.characterVersion >= latestInventoryVersion && scene.inventory?.characterVersion !== update.characterVersion) {
+        latestInventoryVersion = update.characterVersion
+        scene.inventory = update
+      }
+      const { result } = update
+      if (
+        result &&
+        pendingEquipment &&
+        result.requestId === pendingEquipment.requestId &&
+        result.requestEpoch === pendingEquipment.requestEpoch
+      ) {
+        pendingEquipment = undefined
+        scene.equipmentStatus = result.code
       }
     })
     const unbindCheckpoint = room.onMessage(movementCheckpointMessage, (payload: unknown) => {
@@ -590,6 +674,7 @@ export async function runMultiplayer(
         localTick = tick
         const intent = input.sample()
         if (intent.actions.includes('ap')) toggleApPanel()
+        if (intent.actions.includes('inventory')) toggleInventory()
         const controller = prediction.predicted?.controller
         if (intent.portalPressed && controller) {
           const portal = findOverlappingPortal(scene.map, controller.position)
@@ -702,7 +787,7 @@ export async function runMultiplayer(
       if (host.dataset.combatDamageSeen !== damageSeen) host.dataset.combatDamageSeen = damageSeen
     }
     const players = peers.size + 1
-    const apStatus = scene.ap?.status
+    const { apStatus, equipmentStatus } = scene
     if (
       players !== previous?.players ||
       hp !== previous.hp ||
@@ -711,10 +796,27 @@ export async function runMultiplayer(
       state !== previous.state ||
       facing !== previous.facing ||
       scene.progression !== previous.progression ||
-      apStatus !== previous.apStatus
+      apStatus !== previous.apStatus ||
+      scene.inventory !== previous.inventory ||
+      equipmentStatus !== previous.equipmentStatus
     ) {
       const mapName = data.world.maps.find(({ id }) => id === scene.map.id)?.name ?? scene.map.id
-      previous = { hp, maxHp, state, facing, players, mapName, spawnProtected, progression: scene.progression, apStatus, allocateAp }
+      previous = {
+        hp,
+        maxHp,
+        state,
+        facing,
+        players,
+        mapName,
+        spawnProtected,
+        progression: scene.progression,
+        apStatus,
+        allocateAp,
+        inventory: scene.inventory,
+        items: data.items,
+        equipmentStatus,
+        changeEquipment,
+      }
       publish(previous)
     }
   }

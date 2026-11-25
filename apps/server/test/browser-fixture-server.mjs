@@ -69,12 +69,30 @@ export async function startBrowserFixtureServer({
   combatScenario = false,
   movementScenario = false,
   progressionScenario = false,
+  inventoryScenario = false,
   traceMovement = false,
   observeReward,
   beforeReward,
 } = {}) {
   const original = loadGrayboxGameData()
-  const data = progressionScenario ? progressionTestData() : original
+  const data = progressionScenario
+    ? progressionTestData()
+    : inventoryScenario
+      ? {
+          ...original,
+          tiledMaps: original.tiledMaps.map((map) => {
+            if (map.id !== 'm1') return map
+            const portal = map.portals.find(({ id }) => id === 'p_to_village')
+            if (!portal) throw new Error('Inventory fixture needs the M1 portal')
+            return {
+              ...map,
+              spawns: map.spawns.map((spawn) =>
+                spawn.id === 'spawn_from_village' ? { ...spawn, position: { ...spawn.position, x: portal.bounds.origin.x + 16 } } : spawn
+              ),
+            }
+          }),
+        }
+      : original
   const version = joinVersion(original)
   const tiledMaps = combatScenario
     ? data.tiledMaps.map((map) =>
@@ -187,8 +205,8 @@ export async function startBrowserFixtureServer({
     },
     createRoom(mapId, roomId) {
       const runtime = world.createRoom(mapId, roomId)
+      if (progressionScenario || inventoryScenario || traceMovement) tracedRooms.set(roomId, runtime)
       if (traceMovement) {
-        tracedRooms.set(roomId, runtime)
         const freeze = runtime.freeze
         const prepareArrival = runtime.prepareArrival
         const rebind = runtime.rebind
@@ -269,7 +287,16 @@ export async function startBrowserFixtureServer({
     },
     progressionAt({ roomId, sessionId }) {
       const connection = matchMaker.getLocalRoomById(roomId)?.clients.getById(sessionId)
-      if (room?.roomId === roomId && connection) return world.progression(room, connection)
+      const runtime = tracedRooms.get(roomId) ?? (room?.roomId === roomId ? room : undefined)
+      if (runtime && connection) return world.progression(runtime, connection)
+    },
+    inventoryAt({ roomId, sessionId }) {
+      const runtime = tracedRooms.get(roomId)
+      const connection = matchMaker.getLocalRoomById(roomId)?.clients.getById(sessionId)
+      if (runtime && connection) return world.inventory(runtime, connection)
+    },
+    grantInventory(characterId, grantId, grant) {
+      return world.queueInventoryGrant(characterId, grantId, grant)
     },
     startMovementTrace({ roomId, sessionId }, startedAt) {
       const connection = matchMaker.getLocalRoomById(roomId)?.clients.getById(sessionId)

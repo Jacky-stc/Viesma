@@ -1269,3 +1269,143 @@ test('shows private progression, waits for authority, and opens the AP panel wit
     await fixture.close()
   }
 })
+
+test('opens private inventory on keyboard and touch and reconciles equipment across reconnect and transfer', async ({
+  page,
+  browser,
+  baseURL,
+}) => {
+  const fixture = await startBrowserFixtureServer({ inventoryScenario: true })
+  const other = await browser.newPage({ baseURL, viewport: { width: 667, height: 375 }, hasTouch: true, isMobile: true })
+  const observerPackets = []
+  let ownerSocket
+  let initialInventory
+  let lastConfirmation
+  let holdConfirmation = false
+  let heldConfirmation
+  try {
+    await page.routeWebSocket(
+      ({ host }) => host === fixture.address,
+      (socket) => {
+        ownerSocket = socket
+        const server = socket.connectToServer()
+        server.onMessage((message) => {
+          if (Buffer.isBuffer(message) && message.includes('OwnerInventory')) {
+            initialInventory ??= message
+            if (holdConfirmation && message.includes('CONFIRMED')) {
+              heldConfirmation = message
+              return
+            }
+            if (message.includes('CONFIRMED')) lastConfirmation = message
+          }
+          socket.send(message)
+        })
+      }
+    )
+    await other.routeWebSocket(
+      ({ host }) => host === fixture.address,
+      (socket) => {
+        const server = socket.connectToServer()
+        server.onMessage((message) => {
+          if (Buffer.isBuffer(message)) observerPackets.push(message)
+          socket.send(message)
+        })
+      }
+    )
+    const currentSeat = await routeFixtureTravel(page, fixture)
+    const owner = await joinProgression(page, fixture)
+    const observer = await joinProgression(other, fixture)
+    const canvas = page.locator('.playground-canvas canvas')
+    await canvas.evaluate((element) => {
+      globalThis.inventoryCanvas = element
+    })
+
+    const mobilePanel = other.getByRole('dialog', { name: '物品欄' })
+    await other.getByRole('button', { name: '物品欄', exact: true }).tap()
+    await expect(mobilePanel.getByRole('listitem')).toHaveCount(27)
+    await mobilePanel.getByRole('button', { name: /背包槽 1 · HP Potion ×5/ }).tap()
+    await expect(mobilePanel.getByRole('region', { name: '物品詳情' })).toContainText('恢復 50 HP')
+    await mobilePanel.getByRole('button', { name: '武器 · Training Sword' }).tap()
+    await mobilePanel.getByRole('button', { name: '卸下裝備' }).tap()
+    await expect(mobilePanel.getByRole('status')).toHaveText('裝備已更新')
+    await expect(mobilePanel.getByText('武器 · 空')).toBeVisible()
+    await mobilePanel.getByRole('button', { name: /背包槽 3 · Training Sword/ }).tap()
+    await mobilePanel.getByRole('button', { name: '裝備物品' }).tap()
+    await expect(mobilePanel.getByRole('button', { name: '武器 · Training Sword' })).toBeVisible()
+
+    const id = owner.authority.characterId
+    const accessory = { itemDefinitionId: 'accessory_tier_1', itemInstanceId: 'owner-private-accessory', quantity: 1 }
+    expect(await fixture.grantInventory(id, 'accessory', accessory)).toBe('CONFIRMED')
+    expect(
+      await fixture.grantInventory(id, 'high-sword', { itemDefinitionId: 'sword_tier_5', itemInstanceId: 'owner-high-sword', quantity: 1 })
+    ).toBe('CONFIRMED')
+    const surface = page.getByLabel('平台測試場')
+    await surface.focus()
+    await page.keyboard.press('i')
+    const panel = page.getByRole('dialog', { name: '物品欄' })
+    await expect(panel.getByText('金幣 0')).toBeVisible()
+    await expect(panel.getByRole('button', { name: /^背包槽 / })).toHaveCount(24)
+    await panel.getByRole('button', { name: /^背包槽 4 · / }).click()
+    await expect(panel.getByRole('region', { name: '物品詳情' })).toContainText('需求等級 5')
+    await panel.getByRole('button', { name: '裝備物品' }).click()
+    await expect(panel.getByRole('status')).toHaveText('角色等級不足')
+    expect(fixture.inventoryAt(owner.seat).characterVersion).toBe(2)
+
+    await panel.getByRole('button', { name: /^背包槽 3 · / }).click()
+    await expect(panel.getByRole('region', { name: '物品詳情' })).toContainText('STR +1')
+    holdConfirmation = true
+    await panel.getByRole('button', { name: '裝備物品' }).click()
+    await expect(panel.getByRole('status')).toHaveText('等待伺服器確認…')
+    await expect(panel.getByRole('button', { name: '飾品 · 空' })).toBeVisible()
+    await expect.poll(() => Boolean(heldConfirmation)).toBe(true)
+    expect(fixture.inventoryAt(owner.seat)).toMatchObject({ characterVersion: 3, equipment: { accessory } })
+    expect(fixture.progressionAt(owner.seat).stats).toMatchObject({ maxHp: 55, attackPower: 23 })
+
+    holdConfirmation = false
+    expect(fixture.drop(owner.seat)).toBe(true)
+    await expect(panel.getByRole('status')).toHaveText('裝備已更新')
+    const recovered = currentSeat()
+    expect(recovered.sessionId).not.toBe(owner.seat.sessionId)
+    expect(fixture.inventoryAt(recovered)).toMatchObject({ characterId: id, characterVersion: 3, equipment: { accessory } })
+    ownerSocket.send(initialInventory)
+    const equippedAccessory = panel.getByRole('button', { name: /^飾品 · (?!空)/ })
+    await expect(equippedAccessory).toBeVisible()
+    await expect(owner.hud).toContainText('HP 50 / 55')
+    const oldConfirmation = lastConfirmation
+    await equippedAccessory.click()
+    await panel.getByRole('button', { name: '卸下裝備' }).click()
+    await expect(panel.getByRole('button', { name: '飾品 · 空' })).toBeVisible()
+    ownerSocket.send(oldConfirmation)
+    await panel.getByRole('button', { name: /^背包槽 3 · / }).click()
+    await panel.getByRole('button', { name: '裝備物品' }).click()
+    await expect(equippedAccessory).toBeVisible()
+    expect(fixture.inventoryAt(recovered).characterVersion).toBe(5)
+    await page.keyboard.press('i')
+    await expect(panel).toBeHidden()
+    await surface.focus()
+    expect(fixture.movementAt(recovered).eligiblePortal).toBe('p_to_village')
+    await page.keyboard.press('ArrowUp')
+    await expect(page.getByLabel('目前地圖')).toHaveText('Village')
+    const destination = currentSeat()
+    expect(destination.roomId).not.toBe(recovered.roomId)
+    expect(fixture.inventoryAt(destination)).toMatchObject({
+      characterId: id,
+      mapEpoch: 1,
+      characterVersion: 5,
+      currency: 0,
+      equipment: { accessory },
+    })
+    await page.keyboard.press('i')
+    await expect(panel.getByRole('button', { name: /^飾品 · (?!空)/ })).toBeVisible()
+
+    const inventoryPackets = observerPackets.filter((message) => message.includes('OwnerInventory'))
+    expect(inventoryPackets.length).toBeGreaterThan(0)
+    expect(inventoryPackets.every((message) => message.includes(observer.authority.characterId))).toBe(true)
+    expect(observerPackets.some((message) => message.includes('owner-private-accessory'))).toBe(false)
+    await expect(canvas).toHaveCount(1)
+    expect(await canvas.evaluate((element) => element === globalThis.inventoryCanvas)).toBe(true)
+  } finally {
+    await other.close()
+    await fixture.close()
+  }
+})

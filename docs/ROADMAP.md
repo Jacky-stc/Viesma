@@ -421,7 +421,7 @@ M5.1（`DONE`）→ 路線圖整理 → 啟動第一輪行動實機 smoke，與 
 - **Deliverables**：inventory services／ports、atomic memory mutations、inventory／item detail UI。
 - **Acceptance criteria**：24-slot 不溢位；滿包 equip 可用來源 slot 交換，滿包 unequip 拒絕；同物品不複製到兩 location。
 - **Required tests**：full bag／stack overflow／multi-stack atomicity、wrong owner／slot type、same request 不同 payload、concurrent equip／AP／pickup、rollback 不留半成品。
-- **Status**：NOT_STARTED
+- **Status**：LOCAL_VERIFIED · [Evidence](evidence/M5.md#m53)
 
 ### M5.4 — Ground pickup、consumables 與 owner-only view
 
