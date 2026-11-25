@@ -51,7 +51,7 @@ pnpm run validate:maps @mapFiles
 | `MonsterSpawn`（地面） | Point | `spawnId`、`monsterArchetypeId`、`floorId` 為 string，`level` 為 int，`patrolMinX`／`patrolMaxX` 為 int 或 float | 腳底和整個水平巡邏段須在指定 collider 的頂面上，且段內無實體阻隔。 |
 | `MonsterSpawn`（飛行） | Rectangle | `spawnId`、`monsterArchetypeId` 為 string，`level` 為 int | 飛行範圍內無實體碰撞，以矩形中心為出生點。地圖上須有 `LootFallback`。 |
 | `Npc` | Point | `name` 為 NPC ID | 位置須在地圖內並離開實體內部。發行版 Village 必須有 `npc_guide`，點位同時是 Guide 的腳底繪製錨點與距離判定基準。 |
-| `LootFallback` | Point | `name` 為 fallback ID | 點須在 solid／one-way 頂面的水平內側，且避開實體內部。 |
+| `LootFallback` | Point | `name` 為 fallback ID | 點為腳底中心，須在 solid／one-way 頂面的水平內側，提供玩家碰撞盒淨空。只有地面怪的地圖可沿用已驗證的 `PlayerSpawn` 腳底中心，優先使用 `spawn_from_village`。 |
 
 每張地圖的 Tiled layer ID 與 object ID 各自唯一。Stable ID 使用小寫 ASCII 字母、數字、底線及連字號，開頭須為字母或數字。Collider、spawn、portal、NPC、loot fallback 各自有地圖內 ID 空間，玩家與怪物共用 spawn ID 空間。怪物型態由 archetype 定義，配置須在 manifest 的類型、等級和數量範圍內。Village 不可含怪。M2.1 允許先匯入尚未放滿怪物標記的 graybox。
 

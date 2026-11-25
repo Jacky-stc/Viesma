@@ -1409,3 +1409,163 @@ test('opens private inventory on keyboard and touch and reconciles equipment acr
     await fixture.close()
   }
 })
+
+test('picks up private drops and uses potions on keyboard and landscape touch across reconnect and transfer', async ({
+  page,
+  browser,
+  baseURL,
+}) => {
+  const fixture = await startBrowserFixtureServer({ inventoryScenario: true, groundLootScenario: true })
+  const mobile = await browser.newPage({ baseURL, viewport: { width: 667, height: 375 }, hasTouch: true, isMobile: true })
+  const mobilePackets = []
+  const desktopPackets = []
+  let desktopSocket
+  let oldInventory
+  let oldLoot
+  let heldPickup
+  let heldConsume
+  let holdPickup = true
+  let holdConsume = false
+  async function inspectWire(target, packets) {
+    await target.routeWebSocket(
+      ({ host }) => host === fixture.address,
+      (socket) => {
+        if (target === page) desktopSocket = socket
+        const server = socket.connectToServer()
+        server.onMessage((message) => {
+          if (Buffer.isBuffer(message)) {
+            packets.push(message)
+            if (target === page) {
+              if (message.includes('OwnerInventory')) oldInventory ??= message
+              if (message.includes('OwnerGroundLoot') && message.includes('snapshot')) oldLoot ??= message
+              if (message.includes('OwnerLootCommandResult') && message.includes('CONFIRMED')) {
+                if (holdPickup && message.includes('pickup')) {
+                  heldPickup = message
+                  return
+                }
+                if (holdConsume && message.includes('consume')) {
+                  heldConsume = message
+                  return
+                }
+              }
+            }
+          }
+          socket.send(message)
+        })
+      }
+    )
+  }
+  try {
+    await inspectWire(page, desktopPackets)
+    await inspectWire(mobile, mobilePackets)
+    const travelSeat = await routeFixtureTravel(page, fixture)
+    const desktop = await joinProgression(page, fixture)
+    const touch = await joinProgression(mobile, fixture)
+    expect(touch.seat.roomId).toBe(desktop.seat.roomId)
+    const desktopStage = page.locator('.playground-canvas')
+    const mobileStage = mobile.locator('.playground-canvas')
+    const canvas = desktopStage.locator('canvas')
+    await canvas.evaluate((element) => {
+      globalThis.groundLootCanvas = element
+    })
+    await expect(desktop.hud).toContainText('金幣 0')
+    await expect(touch.hud).toContainText('金幣 0')
+    const coin = fixture.deliverGroundLoot(desktop.seat, { kind: 'currency', amount: 17 }, 'desktop-coin')
+    await expect(desktopStage).toHaveAttribute('data-ground-loot-sprites', '1')
+    await expect(mobileStage).toHaveAttribute('data-ground-loot-sprites', '0')
+    await page.getByLabel('平台測試場').focus()
+    await page.keyboard.press('f')
+    const desktopPickup = page.getByRole('status', { name: '拾取結果' })
+    await expect(desktopPickup).toHaveText('正在拾取…')
+    await expect.poll(() => Boolean(heldPickup)).toBe(true)
+    await expect(desktop.hud).toContainText('金幣 17')
+    expect(fixture.inventoryAt(desktop.seat)).toMatchObject({ currency: 17, characterVersion: 1 })
+    desktopSocket.send(oldInventory)
+    const kept = fixture.deliverGroundLoot(desktop.seat, { kind: 'item', itemDefinitionId: 'hp_potion', quantity: 2 }, 'desktop-kept-item')
+    await expect(desktopStage).toHaveAttribute('data-ground-loot-sprites', '1')
+    await expect(desktop.hud).toContainText('金幣 17')
+    holdPickup = false
+    expect(fixture.drop(desktop.seat)).toBe(true)
+    await expect(desktopPickup).toHaveText('拾取成功')
+    const recovered = travelSeat()
+    expect(recovered.sessionId).not.toBe(desktop.seat.sessionId)
+    await expect(desktopStage).toHaveAttribute('data-ground-loot-sprites', '1')
+    desktopSocket.send(oldLoot)
+
+    const maxHp = fixture.progressionAt(recovered).stats.maxHp
+    fixture.setLootVitals(recovered, { hp: 7 })
+    await expect(desktop.hud).toContainText(`HP 7 / ${maxHp}`)
+    await page.getByLabel('平台測試場').focus()
+    holdConsume = true
+    await page.keyboard.press('1')
+    const desktopConsume = page.getByRole('status', { name: '藥水使用結果' })
+    await expect.poll(() => Boolean(heldConsume)).toBe(true)
+    await expect(desktopConsume).toHaveText('正在使用藥水…')
+    const restoredHp = Math.min(7 + 50, maxHp)
+    await expect(desktop.hud).toContainText(`HP ${restoredHp} / ${maxHp}`)
+    expect(fixture.inventoryAt(recovered).bag[0].quantity).toBe(4)
+    holdConsume = false
+    expect(fixture.drop(recovered)).toBe(true)
+    await expect(desktopConsume).toHaveText('已使用藥水')
+    const healedSeat = travelSeat()
+    expect(healedSeat.sessionId).not.toBe(recovered.sessionId)
+    expect(fixture.movementAt(healedSeat)).toMatchObject({ characterId: desktop.authority.characterId, hp: restoredHp })
+    expect(fixture.inventoryAt(healedSeat).bag[0].quantity).toBe(4)
+
+    const mobileDrop = fixture.deliverGroundLoot(touch.seat, { kind: 'item', itemDefinitionId: 'hp_potion', quantity: 2 }, 'mobile-item')
+    await expect(mobileStage).toHaveAttribute('data-ground-loot-sprites', '1')
+    await mobile.getByRole('button', { name: '拾取', exact: true }).tap()
+    await expect(mobile.getByRole('status', { name: '拾取結果' })).toHaveText('拾取成功')
+    expect(fixture.inventoryAt(touch.seat).bag[0].quantity).toBe(7)
+    await mobile.getByRole('button', { name: '物品欄', exact: true }).tap()
+    const inventory = mobile.getByRole('dialog', { name: '物品欄' })
+    await expect(inventory.getByRole('button', { name: /HP Potion ×7/ })).toBeVisible()
+    await inventory.getByRole('button', { name: '關閉' }).tap()
+    const maxMp = fixture.progressionAt(touch.seat).stats.maxMp
+    fixture.setLootVitals(touch.seat, { mp: 1 })
+    await expect.poll(() => fixture.movementAt(touch.seat).mp).toBe(1)
+    await mobile.getByRole('button', { name: 'MP 藥水' }).tap()
+    const mobileConsume = mobile.getByRole('status', { name: '藥水使用結果' })
+    await expect(mobileConsume).toHaveText('已使用藥水')
+    expect(fixture.movementAt(touch.seat).mp).toBe(Math.min(maxMp, 31))
+    expect(fixture.inventoryAt(touch.seat).bag[1].quantity).toBe(2)
+    fixture.advanceWorldTicks(31)
+    await mobile.getByRole('button', { name: 'HP 藥水' }).tap()
+    await expect(mobileConsume).toHaveText('數值已滿')
+    expect(fixture.inventoryAt(touch.seat).bag[0].quantity).toBe(7)
+
+    const expectPrivate = (packets, id, own, foreign) => {
+      const privatePackets = packets.filter((message) => message.includes('OwnerGroundLoot') || message.includes('OwnerLootCommandResult'))
+      expect(privatePackets.length).toBeGreaterThan(0)
+      expect(privatePackets.every((message) => message.includes(id))).toBe(true)
+      expect(privatePackets.some((message) => message.includes(own))).toBe(true)
+      for (const otherId of foreign) expect(packets.some((message) => message.includes(otherId))).toBe(false)
+    }
+    expectPrivate(desktopPackets, desktop.authority.characterId, kept.lootId, [mobileDrop.lootId])
+    expectPrivate(mobilePackets, touch.authority.characterId, mobileDrop.lootId, [coin.lootId, kept.lootId])
+    fixture.placeAtLootFixturePortal(healedSeat, 'p_to_village')
+    await expect.poll(() => fixture.movementAt(healedSeat).eligiblePortal).toBe('p_to_village')
+    await expect(desktopStage).toHaveAttribute('data-local-predicted-x', String(fixture.movementAt(healedSeat).x))
+    await page.keyboard.press('ArrowUp')
+    await expect(page.getByLabel('目前地圖')).toHaveText('Village')
+    await expect(desktopStage).toHaveAttribute('data-ground-loot-sprites', '0')
+    const village = travelSeat()
+    expect(fixture.movementAt(village)).toMatchObject({ characterId: desktop.authority.characterId, hp: restoredHp })
+    expect(fixture.inventoryAt(village).bag[0].quantity).toBe(4)
+    fixture.placeAtLootFixturePortal(village, 'p_to_m1')
+    await expect.poll(() => fixture.movementAt(village).eligiblePortal).toBe('p_to_m1')
+    await expect(desktopStage).toHaveAttribute('data-local-predicted-x', String(fixture.movementAt(village).x))
+    await page.keyboard.press('ArrowUp')
+    await expect(desktopStage).toHaveAttribute('data-multiplayer-map-epoch', '2')
+    expect(travelSeat().roomId).toBe(desktop.seat.roomId)
+    await expect(desktopStage).toHaveAttribute('data-ground-loot-sprites', '1')
+    fixture.advanceLootClock(120_000)
+    await expect(desktopStage).toHaveAttribute('data-ground-loot-sprites', '0')
+    await expect(desktop.hud).toContainText('金幣 17')
+    await expect(canvas).toHaveCount(1)
+    expect(await canvas.evaluate((element) => element === globalThis.groundLootCanvas)).toBe(true)
+  } finally {
+    await mobile.close()
+    await fixture.close()
+  }
+})

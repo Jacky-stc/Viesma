@@ -1,6 +1,7 @@
 import { Client, type Room } from '@colyseus/sdk'
-import { toSimulationTick, type Attributes, type EquipmentOperation } from '@viesma/domain'
+import { toSimulationTick, type Attributes, type EquipmentOperation, type ItemDefinitionId } from '@viesma/domain'
 import {
+  initialEncounterRewardBalance,
   initialPhysicsBalance,
   loadGrayboxGameData,
   serializeMapManifest,
@@ -12,27 +13,37 @@ import {
   allocateApMessage,
   cancelTransferMessage,
   combatDamageMessage,
+  consumeItemMessage,
   equipmentMessage,
   inputFrameMessage,
   interactPortalMessage,
   mapRoomJoinedMessage,
   mapRoomName,
   movementCheckpointMessage,
+  ownerGroundLootMessage,
   ownerInventoryMessage,
+  ownerLootCommandResultMessage,
   ownerProgressionMessage,
   parseMapRoomSession,
   parseMovementCheckpoint,
+  parseOwnerGroundLoot,
   parseOwnerInventory,
+  parseOwnerLootCommandResult,
   parseOwnerProgression,
   parseTransferFailure,
   parseTransferOffer,
+  pickupLootMessage,
   PROTOCOL_VERSION,
+  refreshGroundLootMessage,
   transferFailureMessage,
   transferOfferMessage,
   type AllocateApRequest,
   type ApResultCode,
   type EquipmentRequest,
   type EquipmentResultCode,
+  type GroundLootOperation,
+  type GroundLootRequest,
+  type LootResultCode,
   type MapRoomSession,
   type OnlineMapId,
   type OwnerInventory,
@@ -53,6 +64,7 @@ import { createWorldRenderer } from '../rendering/world-renderer'
 import { createCombatPresentation } from './combat-presentation'
 import { createCorrectionPresentation } from './correction-presentation'
 import { createLocalPrediction } from './local-prediction'
+import { createOwnerLootView, matchesOwnerLoot } from './owner-loot-view'
 import { createRemotePresentation } from './remote-presentation'
 
 export type MultiplayerPresentation = Pick<PublicPlayer, 'hp' | 'maxHp' | 'state' | 'facing' | 'spawnProtected'> & {
@@ -62,6 +74,8 @@ export type MultiplayerPresentation = Pick<PublicPlayer, 'hp' | 'maxHp' | 'state
   readonly inventory: OwnerInventory | undefined
   readonly items: readonly ItemDefinition[]
   readonly equipmentStatus: 'PENDING' | EquipmentResultCode | undefined
+  readonly pickupStatus: LootResultCode | undefined
+  readonly consumeStatus: LootResultCode | undefined
   readonly changeEquipment: (operation: EquipmentOperation, snapshot: OwnerInventory) => boolean
   readonly apStatus: 'PENDING' | ApResultCode | undefined
   readonly allocateAp: (deltas: Attributes, snapshot: OwnerProgression) => boolean
@@ -80,11 +94,14 @@ interface RoomScene {
   readonly correction: ReturnType<typeof createCorrectionPresentation>
   readonly remote: ReturnType<typeof createRemotePresentation>
   readonly combat: ReturnType<typeof createCombatPresentation>
+  readonly groundLoot: ReturnType<typeof createOwnerLootView>
   binding?: MapRoomSession
   progression?: OwnerProgression
   inventory?: OwnerInventory
   apStatus?: 'PENDING' | ApResultCode
   equipmentStatus?: 'PENDING' | EquipmentResultCode
+  pickupStatus?: LootResultCode
+  consumeStatus?: LootResultCode
   prediction?: ReturnType<typeof createLocalPrediction>
   latest?: { self: PublicPlayer; serverTick: number; mapInstanceId: string }
   recoveryTarget?: { readonly requestId: number | null; readonly location: RoomLocation } | undefined
@@ -220,6 +237,7 @@ export async function runMultiplayer(
   let economyRequestId = 0
   let pendingAp: AllocateApRequest | undefined
   let pendingEquipment: EquipmentRequest | undefined
+  const pendingLoot = new Map<GroundLootOperation['kind'], GroundLootRequest>()
 
   function canSend(scene: RoomScene, binding: MapRoomSession, snapshot: OwnerProgression | OwnerInventory): boolean {
     return (
@@ -268,6 +286,59 @@ export async function runMultiplayer(
     return true
   }
 
+  function sendLootRequest(scene: RoomScene, request: GroundLootRequest) {
+    const { binding } = scene
+    if (!binding) return
+    const { kind, ...payload } = request
+    scene.room.send(kind === 'pickup' ? pickupLootMessage : consumeItemMessage, {
+      ...payload,
+      connectionEpoch: binding.connectionEpoch,
+      mapEpoch: binding.mapEpoch,
+    })
+  }
+
+  function requestLootAction(scene: RoomScene, action: 'pickup' | 'hpPotion' | 'mpPotion', controller: PlayerControllerState) {
+    const kind = action === 'pickup' ? 'pickup' : 'consume'
+    const { binding, inventory } = scene
+    if (!binding || !inventory || pendingLoot.has(kind) || !canSend(scene, binding, inventory)) return
+    let operation: GroundLootOperation
+    if (kind === 'pickup') {
+      const x = controller.position.x + initialPhysicsBalance.bodyWidthWorldUnits / 2
+      const y = controller.position.y + initialPhysicsBalance.bodyHeightWorldUnits
+      const distance = ({ position }: { position: { x: number; y: number } }) => (x - position.x) ** 2 + (y - position.y) ** 2
+      const radius = initialEncounterRewardBalance.lootPickupRadiusWorldUnits
+      const nearest = [...scene.groundLoot.loot().values()].sort(
+        (a, b) => distance(a) - distance(b) || (a.lootId < b.lootId ? -1 : Number(a.lootId > b.lootId))
+      )[0]
+      if (!nearest || distance(nearest) > radius ** 2) {
+        scene.pickupStatus = 'LOOT_UNAVAILABLE'
+        return
+      }
+      scene.pickupStatus = 'PENDING'
+      operation = { kind, lootId: nearest.lootId }
+    } else {
+      const itemDefinitionId = (action === 'hpPotion' ? 'hp_potion' : 'mp_potion') as ItemDefinitionId
+      const bagSlot = inventory.bag.findIndex((item) => item?.itemDefinitionId === itemDefinitionId && item.quantity > 0)
+      if (bagSlot < 0) {
+        scene.consumeStatus = 'SOURCE_CHANGED'
+        return
+      }
+      scene.consumeStatus = 'PENDING'
+      operation = { kind, itemDefinitionId, bagSlot }
+    }
+    const request: GroundLootRequest = {
+      ...operation,
+      protocolVersion: PROTOCOL_VERSION,
+      connectionEpoch: binding.connectionEpoch,
+      mapEpoch: binding.mapEpoch,
+      requestEpoch: binding.connectionEpoch,
+      expectedCharacterVersion: inventory.characterVersion,
+      requestId: ++economyRequestId,
+    }
+    pendingLoot.set(kind, request)
+    sendLootRequest(scene, request)
+  }
+
   function stopInput(scene: RoomScene) {
     driver = undefined
     scene.prediction?.suspend()
@@ -311,6 +382,12 @@ export async function runMultiplayer(
       if (pendingEquipment && pendingEquipment.connectionEpoch !== connectionEpoch) {
         scene.equipmentStatus = 'PENDING'
         scene.room.send(equipmentMessage, { ...pendingEquipment, connectionEpoch, mapEpoch })
+      }
+      for (const request of pendingLoot.values()) {
+        if (request.connectionEpoch === connectionEpoch) continue
+        if (request.kind === 'pickup') scene.pickupStatus = 'PENDING'
+        else scene.consumeStatus = 'PENDING'
+        sendLootRequest(scene, request)
       }
     }
     publishStatus('')
@@ -409,6 +486,7 @@ export async function runMultiplayer(
       correction: createCorrectionPresentation(map),
       remote: createRemotePresentation(),
       combat: createCombatPresentation(),
+      groundLoot: createOwnerLootView(),
       requestId: 0,
       detach: () => {
         unbindJoin()
@@ -416,6 +494,8 @@ export async function runMultiplayer(
         unbindCombatDamage()
         unbindProgression()
         unbindInventory()
+        unbindGroundLoot()
+        unbindLootResult()
         unbindOffer()
         unbindFailure()
         room.onStateChange.remove(receiveState)
@@ -528,6 +608,31 @@ export async function runMultiplayer(
         pendingEquipment = undefined
         scene.equipmentStatus = result.code
       }
+    })
+    const unbindGroundLoot = room.onMessage(ownerGroundLootMessage, (payload: unknown) => {
+      const { binding, latest } = scene
+      if (!isCurrent() || !binding || !latest || (recovery && active === scene)) return
+      const update = parseOwnerGroundLoot(payload)
+      if (!update || !matchesOwnerLoot(update, binding, latest.mapInstanceId)) return
+      if (scene.groundLoot.receive(update))
+        room.send(refreshGroundLootMessage, {
+          protocolVersion: PROTOCOL_VERSION,
+          characterId: binding.characterId,
+          connectionEpoch: binding.connectionEpoch,
+          mapEpoch: binding.mapEpoch,
+          mapInstanceId: latest.mapInstanceId,
+        })
+    })
+    const unbindLootResult = room.onMessage(ownerLootCommandResultMessage, (payload: unknown) => {
+      const { binding, latest } = scene
+      if (!isCurrent() || !binding || !latest || (recovery && active === scene)) return
+      const result = parseOwnerLootCommandResult(payload)
+      if (!result || !matchesOwnerLoot(result, binding, latest.mapInstanceId)) return
+      const pending = pendingLoot.get(result.kind)
+      if (!pending || result.requestId !== pending.requestId || result.requestEpoch !== pending.requestEpoch) return
+      if (result.code !== 'PENDING') pendingLoot.delete(result.kind)
+      if (result.kind === 'pickup') scene.pickupStatus = result.code
+      else scene.consumeStatus = result.code
     })
     const unbindCheckpoint = room.onMessage(movementCheckpointMessage, (payload: unknown) => {
       const { binding, latest, correction } = scene
@@ -697,6 +802,10 @@ export async function runMultiplayer(
             return undefined
           }
         }
+        if (controller)
+          for (const action of intent.actions) {
+            if (action === 'pickup' || action === 'hpPotion' || action === 'mpPotion') requestLootAction(scene, action, controller)
+          }
         const frame = prediction.step(intent, tick)
         const trace = smokeTrace?.targetCharacterId === binding.characterId ? smokeTrace : undefined
         if (trace)
@@ -765,6 +874,7 @@ export async function runMultiplayer(
       peers,
       monsters,
       damage: scene.combat.sample(now),
+      groundLoot: !travel && !recovery ? scene.groundLoot.loot() : undefined,
     })
     if (smokeTrace?.targetCharacterId) {
       const target = peers.get(smokeTrace.targetCharacterId)
@@ -787,7 +897,7 @@ export async function runMultiplayer(
       if (host.dataset.combatDamageSeen !== damageSeen) host.dataset.combatDamageSeen = damageSeen
     }
     const players = peers.size + 1
-    const { apStatus, equipmentStatus } = scene
+    const { apStatus, equipmentStatus, pickupStatus, consumeStatus } = scene
     if (
       players !== previous?.players ||
       hp !== previous.hp ||
@@ -798,7 +908,9 @@ export async function runMultiplayer(
       scene.progression !== previous.progression ||
       apStatus !== previous.apStatus ||
       scene.inventory !== previous.inventory ||
-      equipmentStatus !== previous.equipmentStatus
+      equipmentStatus !== previous.equipmentStatus ||
+      pickupStatus !== previous.pickupStatus ||
+      consumeStatus !== previous.consumeStatus
     ) {
       const mapName = data.world.maps.find(({ id }) => id === scene.map.id)?.name ?? scene.map.id
       previous = {
@@ -815,6 +927,8 @@ export async function runMultiplayer(
         inventory: scene.inventory,
         items: data.items,
         equipmentStatus,
+        pickupStatus,
+        consumeStatus,
         changeEquipment,
       }
       publish(previous)

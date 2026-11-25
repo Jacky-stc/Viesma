@@ -44,13 +44,14 @@ export {
   type PlayerInputCommand,
 } from './movement-input.js'
 export { createPlayerController, type PlayerController } from './player-controller.js'
-export { respawnPlayer, type PlayerLifecycleEvent, type PlayerVitalEffect } from './player-lifecycle.js'
+export { applyPlayerVitalEffects, respawnPlayer, type PlayerLifecycleEvent, type PlayerVitalEffect } from './player-lifecycle.js'
 export {
   clampPlayerVitals,
   createPlayer,
   getPlayerPresentationState,
   neutralMovement,
   placePlayerAtSpawn,
+  playerFeet,
   type FacingDirection,
   type PlayerAction,
   type PlayerActionEvent,

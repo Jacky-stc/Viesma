@@ -7,21 +7,34 @@ import {
   type MapInstanceId,
   type SimulationTick,
 } from '@viesma/domain'
-import { deriveCombatStats, getStarterWeaponModifiers, initialBaseAttributes, type GameData, type NormalizedMap } from '@viesma/game-data'
+import {
+  consumableCooldownTicks,
+  deriveCombatStats,
+  getStarterWeaponModifiers,
+  initialBaseAttributes,
+  type GameData,
+  type NormalizedMap,
+} from '@viesma/game-data'
 import {
   isApResultCode,
   isEquipmentResultCode,
+  isLootResultCode,
   parseAllocateAp,
   parseEquipmentRequest,
+  parseGroundLootRefresh,
+  parseGroundLootRequest,
   parsePortalRequest,
   PROTOCOL_VERSION,
   readCharacterRequestId,
   type CharacterRequestHeader,
   type InventoryItemView,
+  type LootResultCode,
   type MapRoomJoin,
   type MapRoomSession,
   type OnlineMapId,
+  type OwnerGroundLoot,
   type OwnerInventory,
+  type OwnerLootCommandResult,
   type OwnerProgression,
   type PortalRequest,
   type TransferFailure,
@@ -35,6 +48,7 @@ import {
   maxCatchUpTicks,
   parseInventoryGrant,
   placePlayerAtSpawn,
+  playerFeet,
   respawnPlayer,
   ticksPerSecond,
   type EncounterRewardIntent,
@@ -44,7 +58,9 @@ import {
 } from '@viesma/simulation'
 import { createCharacterCoordinator, makeCharacterRequest, type CharacterRequest } from './character-coordinator.ts'
 import { createEncounterRewardWorker, type EncounterRewardPort } from './encounter-reward-worker.ts'
+import { createGroundLootStore, type CommittedLootRoll, type GroundLootState } from './ground-loot.ts'
 import { createMapRuntime, type MapRuntime } from './map-runtime.ts'
+import { createMemoryCharacterRepository, type ConsumableEffect } from './memory-character-repository.ts'
 import { getMonsterSpawnDefinitions } from './monster-spawns.ts'
 import type { WatchMovement } from './movement-trace.ts'
 
@@ -58,6 +74,8 @@ interface WorldDependencies {
   readonly partyMembership?: (characterId: CharacterId) => PartyMembership | undefined
   readonly rewardPort?: EncounterRewardPort
   readonly watchMovement?: WatchMovement
+  readonly nowUtcMilliseconds?: () => number
+  readonly characterRepositoryFactory?: typeof createMemoryCharacterRepository
 }
 
 export interface RoomPeer {
@@ -67,11 +85,31 @@ export interface RoomPeer {
   readonly failed: (failure: TransferFailure) => void
   readonly progression?: (snapshot: OwnerProgression) => void
   readonly inventory?: (snapshot: OwnerInventory) => void
+  readonly lootResult?: (result: OwnerLootCommandResult) => void
   readonly close: () => void
 }
 
+type CommandKind = 'ap' | 'equipment' | 'pickup' | 'consume'
+type ConsumeAdmission =
+  | { readonly code: CharacterCommandCode }
+  | {
+      readonly effect: Omit<ConsumableEffect, 'dueTick'>
+      readonly readyAtTick: number
+    }
+type QueuedRequest = {
+  readonly kind: 'request'
+  readonly commandKind: CommandKind
+  readonly header: CharacterRequestHeader
+  readonly request: CharacterRequest
+  readonly consume?: ConsumeAdmission
+}
+interface CommittedConsumable {
+  readonly request: CharacterRequest
+  readonly requestId: number
+  readonly requestEpoch: string
+}
 type CharacterCommand =
-  | { readonly kind: 'request'; readonly header: CharacterRequestHeader; readonly request: CharacterRequest }
+  | QueuedRequest
   | {
       readonly kind: 'grant'
       readonly grantId: string
@@ -92,6 +130,14 @@ interface CharacterRoute {
   portal: PortalRequest | undefined
   transfer: Transfer | undefined
   nextRespawnMilliseconds: number
+  consumableReadyAtTick: number
+  pendingConsumable: CommittedConsumable | undefined
+}
+
+export interface GroundLootFeed {
+  readonly binding: MapRoomJoin
+  readonly mapInstanceId: MapInstanceId
+  readonly state: GroundLootState
 }
 
 type Spawn = NormalizedMap['spawns'][number]
@@ -145,10 +191,24 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     village: { definitions: getMonsterSpawnDefinitions(data, village), maxActive: data.world.maxMonstersPerMap },
   }
 
-  const { clock, schedule, nextId, onBacklog, createDestination } = dependencies
-  const characters = createCharacterCoordinator(data, (characterId, stats) => {
-    routes.get(characterId)?.room.updatePlayerMaxima(characterId, stats)
-  })
+  const {
+    clock,
+    schedule,
+    nextId,
+    onBacklog,
+    createDestination,
+    nowUtcMilliseconds = Date.now,
+    characterRepositoryFactory = createMemoryCharacterRepository,
+  } = dependencies
+  const ground = createGroundLootStore(data.tiledMaps)
+  const consumables = new Map(data.items.filter((item) => item.kind === 'consumable').map((item) => [item.id, item]))
+  const characters = createCharacterCoordinator(
+    data,
+    (characterId, stats) => {
+      routes.get(characterId)?.room.updatePlayerMaxima(characterId, stats)
+    },
+    characterRepositoryFactory(data.items, { store: ground, nowUtcMilliseconds })
+  )
   const rewards = createEncounterRewardWorker(dependencies.rewardPort, prepareSoloReward)
   const combat = {
     playerStats: (characterId: CharacterId) => {
@@ -239,9 +299,9 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
   function reportCommand(
     route: CharacterRoute,
     binding: MapRoomJoin,
-    kind: 'ap' | 'equipment',
+    kind: CommandKind,
     requestId: number,
-    code: CharacterCommandCode,
+    code: CharacterCommandCode | LootResultCode,
     requestEpoch?: string
   ): void {
     const identity = { requestId, ...(requestEpoch !== undefined && { requestEpoch }) }
@@ -249,27 +309,100 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
       if (kind === 'ap' && isApResultCode(code)) route.peer?.progression?.(progressionSnapshot(route, binding, { ...identity, code }))
       if (kind === 'equipment' && isEquipmentResultCode(code))
         route.peer?.inventory?.(inventorySnapshot(route, binding, { ...identity, code }))
+      if ((kind === 'pickup' || kind === 'consume') && isLootResultCode(code))
+        route.peer?.lootResult?.({
+          ...binding,
+          protocolVersion: PROTOCOL_VERSION,
+          mapInstanceId: route.room.mapInstanceId,
+          kind,
+          requestId,
+          requestEpoch: requestEpoch ?? binding.connectionEpoch,
+          code,
+        })
     } catch {
       // 收據與角色狀態已提交，下一次重送可讀取目前快照。
     }
   }
 
-  function matchesBinding(binding: MapRoomJoin, request: CharacterRequestHeader): boolean {
+  function matchesBinding(binding: MapRoomJoin, request: Pick<MapRoomJoin, 'connectionEpoch' | 'mapEpoch'>): boolean {
     return request.connectionEpoch === binding.connectionEpoch && request.mapEpoch === binding.mapEpoch
   }
 
-  function canMutate(route: CharacterRoute, kind: 'ap' | 'equipment'): boolean {
+  function canMutate(route: CharacterRoute, kind: CommandKind): boolean {
     const body = route.room.player(route.characterId)
     return (
       !route.transfer &&
       body !== undefined &&
       body.action.kind !== 'death' &&
       body.vitals.hp > 0 &&
-      (kind === 'ap' || canUseGroundedInteraction(body))
+      (kind === 'equipment' ? canUseGroundedInteraction(body) : kind === 'ap' || !body.physics.inVoid)
     )
   }
 
-  function advanceCommands(route: CharacterRoute): void {
+  function admitConsumable(route: CharacterRoute, request: CharacterRequest): ConsumeAdmission {
+    const { operation, expectedCharacterVersion } = request
+    const body = route.room.player(route.characterId)
+    const state = characters.read(route.characterId)
+    if (operation.kind !== 'consume' || !body || !state || !canMutate(route, 'consume')) return { code: 'UNAVAILABLE' }
+    if (state.version !== expectedCharacterVersion) return { code: 'STALE_VERSION' }
+    const item = consumables.get(operation.itemDefinitionId)
+    if (!item) return { code: 'INVALID_ITEM' }
+    const source = state.inventory.bag[operation.bagSlot]
+    if (source?.kind !== 'stack' || source.itemDefinitionId !== item.id || source.quantity <= 0) return { code: 'SOURCE_CHANGED' }
+    if (
+      tick < route.consumableReadyAtTick ||
+      route.commands.some((command) => command.kind === 'request' && command.consume && 'effect' in command.consume)
+    )
+      return { code: 'COOLDOWN' }
+    const { resource, restoreAmount } = item
+    if (body.vitals[resource] >= (resource === 'hp' ? body.vitals.maxHp : body.vitals.maxMp)) return { code: 'RESOURCE_FULL' }
+    return {
+      effect: { kind: resource === 'hp' ? 'heal' : 'restoreMp', amount: restoreAmount, lifeStartedTick: body.lifeStartedTick },
+      readyAtTick: tick + consumableCooldownTicks,
+    }
+  }
+
+  function advanceConsumable(route: CharacterRoute, frameTick: SimulationTick): void {
+    const pending = route.pendingConsumable
+    if (!pending || routes.get(route.characterId) !== route) return
+    const effect = characters.consumableEffect(route.characterId, pending.request)
+    if (effect && frameTick < effect.dueTick) return
+    route.pendingConsumable = undefined
+    if (!effect) return
+    const code = route.room.applyConsumable(route.characterId, effect, frameTick)
+    characters.finishConsumable(route.characterId, pending.request.key, code)
+
+    const connection = route.peer?.connection
+    const binding = connection && connections.get(connection) === route ? route.room.binding(connection) : undefined
+    if (binding?.characterId === route.characterId) reportCommand(route, binding, 'consume', pending.requestId, code, pending.requestEpoch)
+  }
+
+  function commandAdmission(route: CharacterRoute, command: QueuedRequest, frameTick: SimulationTick) {
+    const {
+      request: { operation },
+      commandKind,
+      consume,
+    } = command
+    const available = canMutate(route, commandKind)
+    if (consume && 'code' in consume) return consume
+    if (!available) return false
+    const body = route.room.player(route.characterId)
+    if (operation.kind === 'pickup' && body) {
+      const grant = ground.inspectPickup(
+        operation.lootId,
+        route.characterId,
+        route.room.mapInstanceId,
+        playerFeet(body),
+        nowUtcMilliseconds()
+      )
+      return 'delivery' in grant ? { pickup: grant.delivery } : grant
+    }
+    if (consume && body?.lifeStartedTick === consume.effect.lifeStartedTick)
+      return { effect: { ...consume.effect, dueTick: toSimulationTick(frameTick + 1) } }
+    return !consume
+  }
+
+  function advanceCommands(route: CharacterRoute, frameTick: SimulationTick): void {
     for (const command of route.commands.splice(0)) {
       if (command.kind === 'grant') {
         try {
@@ -281,25 +414,35 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
       }
       const binding = route.peer && route.room.binding(route.peer.connection)
       if (!binding || !matchesBinding(binding, command.header)) continue
-      const { header, request } = command
-      const kind = request.operation.kind === 'ap' ? 'ap' : 'equipment'
+      const { header, request, commandKind: kind, consume } = command
       let code: CharacterCommandCode
       try {
-        code = characters.execute(route.characterId, request, canMutate(route, kind))
+        code = characters.execute(route.characterId, request, commandAdmission(route, command, frameTick))
       } catch {
         code = 'BUSY'
+      }
+      if (code === 'CONFIRMED' && consume && 'effect' in consume && characters.consumableEffect(route.characterId, request)) {
+        route.pendingConsumable = { request, requestId: header.requestId, requestEpoch: header.requestEpoch ?? header.connectionEpoch }
+        route.consumableReadyAtTick = consume.readyAtTick
+        continue
       }
       reportCommand(route, binding, kind, header.requestId, code, header.requestEpoch)
     }
   }
 
-  function requestCommand(room: MapRuntime, connection: object, payload: unknown, kind: 'ap' | 'equipment'): void {
+  function requestCommand(room: MapRuntime, connection: object, payload: unknown, kind: CommandKind): void {
     const route = connections.get(connection)
     const binding = route?.room === room ? room.binding(connection) : undefined
     const requestId = readCharacterRequestId(payload)
     if (!route || !binding || requestId === undefined) return
-    const header = kind === 'ap' ? parseAllocateAp(payload) : parseEquipmentRequest(payload)
-    const report = (code: CharacterCommandCode) => reportCommand(route, binding, kind, requestId, code, header?.requestEpoch)
+    const header =
+      kind === 'ap'
+        ? parseAllocateAp(payload)
+        : kind === 'equipment'
+          ? parseEquipmentRequest(payload)
+          : parseGroundLootRequest(payload, kind)
+    const report = (code: CharacterCommandCode | LootResultCode) =>
+      reportCommand(route, binding, kind, requestId, code, header?.requestEpoch)
     if (!header) return report(kind === 'ap' ? 'INVALID_ALLOCATION' : 'INVALID_ITEM')
     if (!matchesBinding(binding, header)) return report('STALE_BINDING')
 
@@ -308,6 +451,7 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     const request = makeCharacterRequest(scope, requestId, header.expectedCharacterVersion, operation)
     const receipt = characters.replay(route.characterId, request.key, request.fingerprint)
     if (receipt) {
+      if (kind === 'consume' && receipt === 'CONFIRMED') return report(characters.consumableOutcome(route.characterId, request))
       // 保留舊 AP 呼叫對已汰換失敗請求的回覆。顯式重送始終依原始收據結案。
       return report(
         header.requestEpoch === undefined &&
@@ -322,15 +466,31 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     const existing = route.commands.find((command) => command.kind === 'request' && command.request.key === request.key)
     if (existing?.kind === 'request') {
       if (existing.request.fingerprint !== request.fingerprint) report('REQUEST_CONFLICT')
+      else if (kind === 'pickup' || kind === 'consume') report('PENDING')
       return
     }
     if (scope !== binding.connectionEpoch || requestId < route.lastCommandId) return report('STALE_REQUEST')
-    if (route.commands.some((command) => command.kind === 'request' && (command.request.operation.kind === 'ap') === (kind === 'ap'))) {
+    const consume = kind === 'consume' ? admitConsumable(route, request) : undefined
+    const sameKind = route.commands.filter(
+      (command): command is QueuedRequest => command.kind === 'request' && command.commandKind === kind
+    )
+    if (
+      sameKind.length &&
+      !(
+        sameKind.length === 1 &&
+        consume &&
+        'code' in consume &&
+        consume.code === 'COOLDOWN' &&
+        sameKind[0]?.consume &&
+        'effect' in sameKind[0].consume
+      )
+    ) {
       return report('BUSY')
     }
     route.lastCommandId = requestId
-    route.commands.push({ kind: 'request', header, request })
+    route.commands.push({ kind: 'request', commandKind: kind, header, request, ...(consume && { consume }) })
     clearUnconfirmedToken(route)
+    if (kind === 'pickup' || kind === 'consume') report('PENDING')
   }
 
   function clearTransfer(route: CharacterRoute, reservationConsumed = false) {
@@ -444,6 +604,7 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     route.lastCommandId = -1
     connections.set(candidate.connection, route)
     clearTransfer(route, true)
+    ground.rebind(route.characterId, destination.map.id, destination.mapInstanceId, (id) => rooms.has(id), nowUtcMilliseconds)
     notifyJoined(route, candidate, binding)
     closePeer(sourcePeer)
   }
@@ -533,9 +694,11 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
       { nowMilliseconds: () => wakeMilliseconds },
       (frame) => {
         rewards.advance()
+        ground.expire(nowUtcMilliseconds)
         for (const route of routes.values()) {
           advanceRoute(route, frame.tick, wakeMilliseconds)
-          advanceCommands(route)
+          advanceConsumable(route, frame.tick)
+          advanceCommands(route, frame.tick)
         }
         for (const id of [...rooms.keys()].sort()) rooms.get(id)?.advance(frame, wakeMilliseconds)
         tick = frame.tick
@@ -570,6 +733,9 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
   function removeRoute(route: CharacterRoute) {
     const transfer = clearTransfer(route)
     routes.delete(route.characterId)
+    const pending = route.pendingConsumable
+    route.pendingConsumable = undefined
+    if (pending) characters.finishConsumable(route.characterId, pending.request.key, 'CONSUMED_NO_EFFECT')
     characters.release(route.characterId)
     for (const command of route.commands.splice(0)) if (command.kind === 'grant') command.complete('UNAVAILABLE')
     reconnectTokens.delete(route.reconnectToken)
@@ -637,6 +803,8 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
         portal: undefined,
         transfer: undefined,
         nextRespawnMilliseconds: 0,
+        consumableReadyAtTick: 0,
+        pendingConsumable: undefined,
       }
       routes.set(characterId, route)
       connections.set(peer.connection, route)
@@ -725,6 +893,51 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     },
     requestEquipment(room: MapRuntime, connection: object, payload: unknown): void {
       requestCommand(room, connection, payload, 'equipment')
+    },
+    requestGroundLoot(room: MapRuntime, connection: object, payload: unknown, kind: 'pickup' | 'consume'): void {
+      requestCommand(room, connection, payload, kind)
+    },
+    deliverCommittedGroundLoot(room: MapRuntime, grants: readonly CommittedLootRoll[]): void {
+      if (!registered(room)) throw new RangeError('Ground delivery requires a registered source room')
+      ground.prepareDelivery(grants, room.map.id, room.mapInstanceId, nowUtcMilliseconds())()
+    },
+    ownerGroundLoot(room: MapRuntime, connection: object, previous?: GroundLootFeed, refresh?: unknown) {
+      const route = connections.get(connection)
+      const binding = route?.room === room && route.peer?.connection === connection ? room.binding(connection) : undefined
+      if (!route || !binding || binding.characterId !== route.characterId || !registered(room)) return
+      if (refresh !== undefined) {
+        const request = parseGroundLootRefresh(refresh)
+        if (
+          !request ||
+          request.characterId !== binding.characterId ||
+          !matchesBinding(binding, request) ||
+          request.mapInstanceId !== room.mapInstanceId
+        )
+          return
+      }
+      const state = ground.view(route.characterId, room.mapInstanceId)
+      const feed: GroundLootFeed = { binding, mapInstanceId: room.mapInstanceId, state }
+      const common = { ...binding, protocolVersion: PROTOCOL_VERSION, mapInstanceId: room.mapInstanceId, privateRevision: state.revision }
+      let update: OwnerGroundLoot
+      if (
+        !previous ||
+        previous.mapInstanceId !== room.mapInstanceId ||
+        previous.binding.characterId !== binding.characterId ||
+        !matchesBinding(binding, previous.binding) ||
+        refresh !== undefined
+      ) {
+        update = { ...common, kind: 'snapshot', loot: [...state.loot.values()] }
+      } else {
+        if (previous.state.revision === state.revision) return
+        update = {
+          ...common,
+          kind: 'delta',
+          baseRevision: previous.state.revision,
+          added: [...state.loot.values()].filter(({ lootId }) => !previous.state.loot.has(lootId)),
+          removed: [...previous.state.loot.keys()].filter((id) => !state.loot.has(id)),
+        }
+      }
+      return { feed, update }
     },
     queueInventoryGrant(characterId: CharacterId, grantId: string, grant: InventoryGrant): Promise<CharacterCommandCode> {
       const route = routes.get(characterId)

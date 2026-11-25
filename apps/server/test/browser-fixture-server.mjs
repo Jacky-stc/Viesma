@@ -23,6 +23,7 @@ import { URL } from 'node:url'
 import { createDestinationRoom, createMapRoomClass } from '../dist/adapters/map-room.js'
 import { createMemoryEncounterRewardPort } from '../dist/runtime/encounter-reward-worker.js'
 import { createWorldCoordinator } from '../dist/runtime/world-coordinator.js'
+import { fixtureGroundGrant } from './ground-loot-fixture.mjs'
 import { movementSmokeData } from './movement-smoke-fixture.mjs'
 import { progressionTestData } from './progression-fixture.mjs'
 
@@ -47,6 +48,7 @@ function movementState({ position, physics, movement, locomotion, action, lastHu
     hurtRemaining: action.kind === 'hurt' ? action.ticksRemaining : undefined,
     lastHurtTick,
     hp: vitals?.hp,
+    mp: vitals?.mp,
     spawnProtected,
     appliedSeq: movement.lastProcessedInputSeq,
     moveX: movement.moveX,
@@ -70,6 +72,7 @@ export async function startBrowserFixtureServer({
   movementScenario = false,
   progressionScenario = false,
   inventoryScenario = false,
+  groundLootScenario = false,
   traceMovement = false,
   observeReward,
   beforeReward,
@@ -116,11 +119,14 @@ export async function startBrowserFixtureServer({
   let clockOffset = 0
   let stagedNow
   let movementTrace
+  let lootUtc = 1_795_000_000_000
+  const stagedBodies = new Map()
   const memory = createMemoryEncounterRewardPort()
   const clock = { nowMilliseconds: () => stagedNow ?? performance.now() + clockOffset }
   const world = createWorldCoordinator({ ...data, tiledMaps }, version.mapContentHash, {
     clock,
     nextId: randomUUID,
+    ...(groundLootScenario && { nowUtcMilliseconds: () => lootUtc }),
     createDestination: createDestinationRoom,
     ...(traceMovement && { watchMovement: (id) => (movementTrace?.characterId === id ? movementTrace.capture : undefined) }),
     ...((observeReward || beforeReward) && {
@@ -205,7 +211,7 @@ export async function startBrowserFixtureServer({
     },
     createRoom(mapId, roomId) {
       const runtime = world.createRoom(mapId, roomId)
-      if (progressionScenario || inventoryScenario || traceMovement) tracedRooms.set(roomId, runtime)
+      if (progressionScenario || inventoryScenario || groundLootScenario || traceMovement) tracedRooms.set(roomId, runtime)
       if (traceMovement) {
         const freeze = runtime.freeze
         const prepareArrival = runtime.prepareArrival
@@ -233,6 +239,13 @@ export async function startBrowserFixtureServer({
       if (mapId === 'm1') room = runtime
       const advance = runtime.advance
       runtime.advance = (frame, now) => {
+        for (const [connection, { instance, update }] of stagedBodies) {
+          if (instance !== runtime) continue
+          const binding = runtime.binding(connection)
+          const player = binding && runtime.player(binding.characterId)
+          if (player) runtime.respawn(connection, update(player))
+          stagedBodies.delete(connection)
+        }
         if (runtime === room && pendingApproach) {
           const { connection, characterId, hp } = pendingApproach
           pendingApproach = undefined
@@ -264,6 +277,13 @@ export async function startBrowserFixtureServer({
   server.define(villageMapRoomName, createMapRoomClass(observedWorld, version, 15, 'village'))
   await server.listen(0, '127.0.0.1')
   const address = `127.0.0.1:${transport.server.address().port}`
+  function groundContext({ roomId, sessionId }) {
+    const connection = matchMaker.getLocalRoomById(roomId)?.clients.getById(sessionId)
+    const instance = tracedRooms.get(roomId)
+    const binding = connection && instance?.binding(connection)
+    if (!groundLootScenario || !binding || !instance.player(binding.characterId)) throw new Error('Missing ground loot fixture player')
+    return { instance, connection, binding }
+  }
   return {
     address,
     async reserve(options) {
@@ -297,6 +317,28 @@ export async function startBrowserFixtureServer({
     },
     grantInventory(characterId, grantId, grant) {
       return world.queueInventoryGrant(characterId, grantId, grant)
+    },
+    deliverGroundLoot(seat, content, label) {
+      const { instance, binding } = groundContext(seat)
+      const grant = fixtureGroundGrant(instance, binding.characterId, content, { label, expiresAt: lootUtc + 120_000 })
+      world.deliverCommittedGroundLoot(instance, [grant])
+      return grant
+    },
+    advanceLootClock(milliseconds) {
+      lootUtc += milliseconds
+    },
+    setLootVitals(seat, vitals) {
+      const { connection, instance } = groundContext(seat)
+      stagedBodies.set(connection, { instance, update: (body) => ({ ...body, vitals: { ...body.vitals, ...vitals } }) })
+    },
+    placeAtLootFixturePortal(seat, portalId) {
+      const { connection, instance } = groundContext(seat)
+      const portal = instance.map.portals.find(({ id }) => id === portalId)
+      if (!portal) throw new Error('Missing fixture portal')
+      stagedBodies.set(connection, {
+        instance,
+        update: (body) => placePlayerAtSpawn(body, { ...body.position, x: portal.bounds.origin.x + 16 }, 'right'),
+      })
     },
     startMovementTrace({ roomId, sessionId }, startedAt) {
       const connection = matchMaker.getLocalRoomById(roomId)?.clients.getById(sessionId)

@@ -1,6 +1,6 @@
 export type { LootEntryId } from '@viesma/domain'
 export { monsterAttackAtLevel, monsterDefenseAtLevel, monsterMaxHpAtLevel } from './definitions.js'
-export { initialEncounterRewardBalance } from './encounter-rewards.js'
+export { consumableCooldownTicks, initialEncounterRewardBalance } from './encounter-rewards.js'
 export { createInitialGameDataSource } from './fixture.js'
 export { loadGrayboxGameData } from './graybox.js'
 export type { GuideDefinition } from './guide.js'
@@ -25,6 +25,7 @@ export {
   type PlayerLifecycleBalance,
   type SafeHubFixture,
 } from './player-lifecycle.js'
+export { createLootPlacement } from './tiled/loot-placement.js'
 export { listTiledTilesetSources } from './tiled/tiles.js'
 export type {
   MapCollider,

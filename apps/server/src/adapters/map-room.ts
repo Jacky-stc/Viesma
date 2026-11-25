@@ -5,16 +5,21 @@ import {
   cancelTransferMessage,
   checkJoinVersion,
   combatDamageMessage,
+  consumeItemMessage,
   equipmentMessage,
   inputFrameMessage,
   interactPortalMessage,
   mapRoomJoinedMessage,
   mapRoomName,
   movementCheckpointMessage,
+  ownerGroundLootMessage,
   ownerInventoryMessage,
+  ownerLootCommandResultMessage,
   ownerProgressionMessage,
   parseMapAdmission,
   parseTransferCancellation,
+  pickupLootMessage,
+  refreshGroundLootMessage,
   transferFailureMessage,
   transferOfferMessage,
   villageMapRoomName,
@@ -24,7 +29,7 @@ import {
   type TransferOffer,
 } from '@viesma/protocol'
 import { mapRoomCapacity, type MapRuntime } from '../runtime/map-runtime.ts'
-import type { RoomPeer, WorldCoordinator } from '../runtime/world-coordinator.ts'
+import type { GroundLootFeed, RoomPeer, WorldCoordinator } from '../runtime/world-coordinator.ts'
 
 export function createDestinationRoom(mapId: OnlineMapId) {
   return matchMaker.createRoom(mapId === 'village' ? villageMapRoomName : mapRoomName, {})
@@ -44,6 +49,8 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
     #combatReady = new WeakSet<Client>()
     #progressionVersion = new WeakMap<Client, number>()
     #inventoryVersion = new WeakMap<Client, number>()
+    #lootFeed = new WeakMap<Client, GroundLootFeed>()
+    #lootRefresh = new WeakMap<Client, unknown>()
 
     onCreate(): void {
       const runtime = world.createRoom(mapId, this.roomId)
@@ -63,6 +70,15 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
       })
       this.onMessage(equipmentMessage, (client, payload: unknown) => {
         if (this.clients.getById(client.sessionId) === client) world.requestEquipment(runtime, client, payload)
+      })
+      this.onMessage(pickupLootMessage, (client, payload: unknown) => {
+        if (this.clients.getById(client.sessionId) === client) world.requestGroundLoot(runtime, client, payload, 'pickup')
+      })
+      this.onMessage(consumeItemMessage, (client, payload: unknown) => {
+        if (this.clients.getById(client.sessionId) === client) world.requestGroundLoot(runtime, client, payload, 'consume')
+      })
+      this.onMessage(refreshGroundLootMessage, (client, payload: unknown) => {
+        if (this.clients.getById(client.sessionId) === client) this.#lootRefresh.set(client, payload)
       })
       this.onMessage(cancelTransferMessage, (client, payload: unknown) => {
         const ticket = parseTransferCancellation(payload)
@@ -94,6 +110,7 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
           client.send(ownerInventoryMessage, snapshot)
           this.#inventoryVersion.set(client, snapshot.characterVersion)
         },
+        lootResult: (result) => client.send(ownerLootCommandResultMessage, result),
         close: () => {
           if (this.clients.getById(client.sessionId) === client) this.kickClient(client.sessionId)
         },
@@ -150,6 +167,16 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
         if (inventory) {
           client.send(ownerInventoryMessage, inventory, { afterNextPatch: true })
           this.#inventoryVersion.set(client, inventory.characterVersion)
+        }
+        const previousLoot = this.#lootFeed.get(client)
+        const refresh = this.#lootRefresh.get(client)
+        this.#lootRefresh.delete(client)
+        const loot =
+          (refresh === undefined ? undefined : world.ownerGroundLoot(runtime, client, previousLoot, refresh)) ??
+          world.ownerGroundLoot(runtime, client, previousLoot)
+        if (loot) {
+          client.send(ownerGroundLootMessage, loot.update, { afterNextPatch: true })
+          this.#lootFeed.set(client, loot.feed)
         }
         if (combatDamage && this.#combatReady.has(client)) {
           client.send(combatDamageMessage, combatDamage, { afterNextPatch: true })

@@ -52,6 +52,11 @@ export type CharacterCommandCode =
   | 'STALE_REQUEST'
   | 'REQUEST_CONFLICT'
   | 'BUSY'
+  | 'LOOT_UNAVAILABLE'
+  | 'LOOT_EXPIRED'
+  | 'TOO_FAR'
+  | 'RESOURCE_FULL'
+  | 'COOLDOWN'
   | InventoryError
 
 export type InventoryError = 'INVALID_ITEM' | 'BAG_FULL' | 'SOURCE_CHANGED' | 'WRONG_SLOT' | 'LEVEL_REQUIRED' | 'CURRENCY_LIMIT'

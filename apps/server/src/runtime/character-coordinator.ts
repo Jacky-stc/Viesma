@@ -13,8 +13,10 @@ import {
   type ItemInstanceId,
 } from '@viesma/domain'
 import { deriveCombatStats, type EquipmentModifiers, type GameData } from '@viesma/game-data'
+import type { GroundLootOperation, LootResultCode } from '@viesma/protocol'
 import {
   allocateAttributes,
+  changeCurrency,
   changeEquipment,
   createCharacterAggregate,
   createStarterInventory,
@@ -23,9 +25,14 @@ import {
   parseInventoryGrant,
   type InventoryGrant,
 } from '@viesma/simulation'
-import { createMemoryCharacterRepository, type MemoryCharacterRepository } from './memory-character-repository.ts'
+import { createHash } from 'node:crypto'
+import type { GroundDelivery } from './ground-loot.ts'
+import { createMemoryCharacterRepository, type ConsumableEffect, type MemoryCharacterRepository } from './memory-character-repository.ts'
 
-export type CharacterOperation = { readonly kind: 'ap'; readonly deltas: Attributes } | EquipmentOperation
+export type CharacterOperation = { readonly kind: 'ap'; readonly deltas: Attributes } | EquipmentOperation | GroundLootOperation
+
+type CharacterAdmission =
+  boolean | { readonly code: CharacterCommandCode } | { readonly pickup: GroundDelivery } | { readonly effect: ConsumableEffect }
 
 export interface CharacterRequest {
   readonly key: string
@@ -40,10 +47,22 @@ export function makeCharacterRequest(
   expectedCharacterVersion: number,
   operation: CharacterOperation
 ): CharacterRequest {
-  const payload =
-    operation.kind === 'ap'
-      ? attributeNames.map((name) => operation.deltas[name])
-      : [operation.slot, operation.itemInstanceId, operation.kind === 'equip' ? operation.bagSlot : null]
+  let payload: readonly unknown[]
+  switch (operation.kind) {
+    case 'ap':
+      payload = attributeNames.map((name) => operation.deltas[name])
+      break
+    case 'pickup':
+      payload = [operation.lootId]
+      break
+    case 'consume':
+      payload = [operation.bagSlot, operation.itemDefinitionId]
+      break
+    case 'equip':
+    case 'unequip':
+      payload = [operation.slot, operation.itemInstanceId, operation.kind === 'equip' ? operation.bagSlot : null]
+      break
+  }
   return {
     key: JSON.stringify(['request', scope, requestId]),
     fingerprint: JSON.stringify([operation.kind, expectedCharacterVersion, payload]),
@@ -94,18 +113,29 @@ export function createCharacterCoordinator(
     key: string,
     fingerprint: string,
     code: CharacterCommandCode,
-    next = current
+    next = current,
+    sideEffect?: { readonly pickup: GroundDelivery } | { readonly effect: ConsumableEffect }
   ): CharacterCommandCode {
     if (!isNonNegativeSafeInteger(next.version)) return 'STALE_VERSION'
     const nextStats = next !== current ? stats(next) : undefined
     let result
     try {
-      result = repository.commit({
-        characterId: current.characterId,
-        expectedVersion: current.version,
-        next,
-        receipt: { key, fingerprint, code, changed: next !== current, version: next.version },
-      })
+      result = repository.commit(
+        {
+          characterId: current.characterId,
+          expectedVersion: current.version,
+          next,
+          receipt: {
+            key,
+            fingerprint,
+            code,
+            changed: next !== current,
+            version: next.version,
+            ...(sideEffect && 'effect' in sideEffect && { effect: Object.freeze(sideEffect.effect) }),
+          },
+        },
+        sideEffect && 'pickup' in sideEffect ? sideEffect.pickup : undefined
+      )
     } catch (error) {
       const receipt = repository.findReceipt(current.characterId, key)
       if (!receipt || receipt.fingerprint !== fingerprint) throw error
@@ -126,6 +156,8 @@ export function createCharacterCoordinator(
         return 'STALE_VERSION'
       case 'invalid_inventory':
         return commit(current, key, fingerprint, 'INVALID_ITEM')
+      case 'loot_expired':
+        return commit(current, key, fingerprint, 'LOOT_EXPIRED')
     }
   }
 
@@ -161,14 +193,27 @@ export function createCharacterCoordinator(
     read: repository.read,
     stats,
     replay,
-    execute(characterId: CharacterId, request: CharacterRequest, available: boolean): CharacterCommandCode {
+    consumableEffect(characterId: CharacterId, request: CharacterRequest): ConsumableEffect | undefined {
+      const receipt = repository.findReceipt(characterId, request.key)
+      if (receipt?.fingerprint === request.fingerprint && !receipt.effectOutcome) return receipt.effect
+    },
+    consumableOutcome(characterId: CharacterId, request: CharacterRequest): LootResultCode {
+      const receipt = repository.findReceipt(characterId, request.key)
+      if (receipt?.fingerprint !== request.fingerprint || !receipt.effect) return 'BUSY'
+      return receipt.effectOutcome ?? 'PENDING'
+    },
+    finishConsumable: repository.finishConsumable,
+    execute(characterId: CharacterId, request: CharacterRequest, admission: CharacterAdmission): CharacterCommandCode {
       const { key, fingerprint, expectedCharacterVersion, operation } = request
       const previous = replay(characterId, key, fingerprint)
       if (previous) return previous
       const current = repository.read(characterId)
       if (!current) return 'UNAVAILABLE'
-      if (!available) return commit(current, key, fingerprint, 'UNAVAILABLE')
+      if (admission === false) return commit(current, key, fingerprint, 'UNAVAILABLE')
+      if (operation.kind === 'consume' && admission !== true && 'code' in admission)
+        return commit(current, key, fingerprint, admission.code)
       if (current.version !== expectedCharacterVersion) return commit(current, key, fingerprint, 'STALE_VERSION')
+      if (admission !== true && 'code' in admission) return commit(current, key, fingerprint, admission.code)
       if (operation.kind === 'ap') {
         const result = allocateAttributes(current, operation.deltas)
         return 'code' in result
@@ -180,6 +225,41 @@ export function createCharacterCoordinator(
               'CONFIRMED',
               result.character === current ? current : { ...result.character, inventory: current.inventory }
             )
+      }
+      if (operation.kind === 'pickup') {
+        if (admission === true || !('pickup' in admission) || admission.pickup.grant.lootId !== operation.lootId)
+          return commit(current, key, fingerprint, 'LOOT_UNAVAILABLE')
+        const { content } = admission.pickup.grant
+        const result =
+          content.kind === 'currency'
+            ? changeCurrency(current.inventory, content.amount)
+            : insertInventory(
+                current.inventory,
+                {
+                  itemDefinitionId: content.itemDefinitionId,
+                  quantity: content.quantity,
+                  ...(items.get(content.itemDefinitionId)?.kind === 'equipment' && {
+                    itemInstanceId: `loot:${createHash('sha256').update(operation.lootId).digest('base64url')}` as ItemInstanceId,
+                  }),
+                },
+                data.items
+              )
+        return 'code' in result
+          ? commit(current, key, fingerprint, result.code)
+          : commit(current, key, fingerprint, 'CONFIRMED', withInventory(current, result.inventory), admission)
+      }
+      if (operation.kind === 'consume') {
+        if (admission === true || !('effect' in admission)) return commit(current, key, fingerprint, 'INVALID_ITEM')
+        const { bagSlot, itemDefinitionId } = operation
+        const source = current.inventory.bag[bagSlot]
+        const definition = items.get(itemDefinitionId)
+        if (definition?.kind !== 'consumable') return commit(current, key, fingerprint, 'INVALID_ITEM')
+        if (source?.kind !== 'stack' || source.itemDefinitionId !== itemDefinitionId || source.quantity <= 0)
+          return commit(current, key, fingerprint, 'SOURCE_CHANGED')
+        const bag = [...current.inventory.bag]
+        const quantity = source.quantity - 1
+        bag[bagSlot] = isNonNegativeSafeInteger(quantity) && quantity > 0 ? { ...source, quantity } : null
+        return commit(current, key, fingerprint, 'CONFIRMED', withInventory(current, { ...current.inventory, bag }), admission)
       }
       const result = changeEquipment(current.inventory, operation, current.level, data.items)
       return 'code' in result

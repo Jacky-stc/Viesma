@@ -84,7 +84,7 @@ export interface CharacterMutation {
 
 export type CharacterMutationResult =
   | { readonly kind: 'committed' | 'replayed'; readonly receipt: CharacterMutationReceipt }
-  | { readonly kind: 'conflict' | 'stale' | 'invalid_inventory' | 'missing' }
+  | { readonly kind: 'conflict' | 'stale' | 'invalid_inventory' | 'missing' | 'loot_expired' }
 
 export interface InventoryRepository {
   // 收據查找必須先於 version check。比較版本、寫角色及寫收據屬同一交易。

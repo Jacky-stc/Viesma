@@ -7,13 +7,28 @@ import {
   type CharacterMutationResult,
   type InventoryRepository,
   type ItemInstanceId,
+  type SimulationTick,
 } from '@viesma/domain'
 import type { ItemDefinition } from '@viesma/game-data'
 import { equipmentInstances, isValidInventory } from '@viesma/simulation'
+import type { GroundDelivery, GroundLootStore } from './ground-loot.ts'
+
+export interface ConsumableEffect {
+  readonly kind: 'heal' | 'restoreMp'
+  readonly amount: number
+  readonly lifeStartedTick: SimulationTick
+  readonly dueTick: SimulationTick
+}
+
+export type ConsumableOutcome = 'CONFIRMED' | 'CONSUMED_NO_EFFECT' | 'CONSUMED_DEAD'
+type MemoryReceipt = CharacterMutationReceipt & {
+  readonly effect?: ConsumableEffect
+  readonly effectOutcome?: ConsumableOutcome
+}
 
 interface Entry {
   state: CharacterEconomy
-  readonly receipts: Map<string, CharacterMutationReceipt>
+  readonly receipts: Map<string, MemoryReceipt>
 }
 
 function freezeEconomy(state: CharacterEconomy): CharacterEconomy {
@@ -31,7 +46,10 @@ function freezeEconomy(state: CharacterEconomy): CharacterEconomy {
   return Object.freeze(state)
 }
 
-export function createMemoryCharacterRepository(items: readonly ItemDefinition[]) {
+export function createMemoryCharacterRepository(
+  items: readonly ItemDefinition[],
+  ground?: { readonly store: GroundLootStore; readonly nowUtcMilliseconds: () => number }
+) {
   const entries = new Map<CharacterId, Entry>()
   const owners = new Map<ItemInstanceId, CharacterId>()
 
@@ -76,7 +94,15 @@ export function createMemoryCharacterRepository(items: readonly ItemDefinition[]
     findReceipt(characterId: CharacterId, key: string) {
       return entries.get(characterId)?.receipts.get(key)
     },
-    commit({ characterId, expectedVersion, next, receipt }: CharacterMutation): CharacterMutationResult {
+    finishConsumable(characterId: CharacterId, key: string, outcome: ConsumableOutcome): void {
+      const receipts = entries.get(characterId)?.receipts
+      const previous = receipts?.get(key)
+      if (previous?.effect && !previous.effectOutcome) receipts?.set(key, Object.freeze({ ...previous, effectOutcome: outcome }))
+    },
+    commit(
+      { characterId, expectedVersion, next, receipt }: CharacterMutation & { readonly receipt: MemoryReceipt },
+      pickup?: GroundDelivery
+    ): CharacterMutationResult {
       const entry = entries.get(characterId)
       if (!entry) return { kind: 'missing' }
       const previous = entry.receipts.get(receipt.key)
@@ -100,6 +126,8 @@ export function createMemoryCharacterRepository(items: readonly ItemDefinition[]
       // 候選狀態與收據準備完成後，同一記憶體執行回合才發布。
       freezeEconomy(next)
       const committed = Object.freeze({ ...receipt })
+      if (pickup && (pickup.grant.ownerCharacterId !== characterId || !receipt.changed)) return { kind: 'invalid_inventory' }
+      if (pickup && (!ground || !ground.store.pick(pickup, ground.nowUtcMilliseconds()))) return { kind: 'loot_expired' }
       if (next.inventory !== entry.state.inventory) {
         unindex(entry.state)
         index(next)
@@ -112,6 +140,7 @@ export function createMemoryCharacterRepository(items: readonly ItemDefinition[]
     initialize(characterId: CharacterId, create: () => CharacterEconomy): CharacterEconomy
     read(characterId: CharacterId): CharacterEconomy | undefined
     remove(characterId: CharacterId): void
+    finishConsumable(characterId: CharacterId, key: string, outcome: ConsumableOutcome): void
   }
 }
 

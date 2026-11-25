@@ -1,3 +1,4 @@
+import type { LootResultCode } from '@viesma/protocol'
 import type { GuideInteraction } from '@viesma/simulation'
 import { useEffect, useRef, useState } from 'react'
 import { touchControls } from '../input/browser-input'
@@ -29,6 +30,31 @@ const actionLabels = {
   party: '隊伍',
   ap: '能力點數',
 } satisfies Record<AuxiliaryAction, string>
+
+function lootFeedback(kind: 'pickup' | 'consume', code: LootResultCode): string {
+  if (code === 'PENDING') return kind === 'pickup' ? '正在拾取…' : '正在使用藥水…'
+  if (code === 'CONFIRMED') return kind === 'pickup' ? '拾取成功' : '已使用藥水'
+  const messages = {
+    CONSUMED_NO_EFFECT: '藥水已消耗，未恢復數值',
+    CONSUMED_DEAD: '使用完成，角色已死亡',
+    INVALID_ITEM: '物品資料無效',
+    BAG_FULL: '背包空間不足',
+    SOURCE_CHANGED: '背包沒有對應的藥水，或來源已變更',
+    CURRENCY_LIMIT: '已達金幣上限',
+    STALE_BINDING: '連線已更新，請重新操作',
+    STALE_VERSION: '角色資料已更新，請重新操作',
+    UNAVAILABLE: '目前無法操作',
+    STALE_REQUEST: '請求已失效，請重新操作',
+    REQUEST_CONFLICT: '請求內容衝突',
+    BUSY: '伺服器忙碌，請重新操作',
+    LOOT_UNAVAILABLE: '附近沒有可拾取的掉落物',
+    LOOT_EXPIRED: '掉落物已過期',
+    TOO_FAR: '離掉落物太遠',
+    RESOURCE_FULL: '數值已滿',
+    COOLDOWN: '藥水冷卻中',
+  }
+  return messages[code]
+}
 
 export function Playground() {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -247,16 +273,19 @@ export function Playground() {
                 ))}
               </div>
               <div className="playground-actions">
-                {touchControls.slice(3, online ? 4 : undefined).map(({ control, label, text }) => (
-                  <button
-                    key={control}
-                    type="button"
-                    data-input-control={control}
-                    aria-label={label}
-                  >
-                    {text}
-                  </button>
-                ))}
+                {touchControls
+                  .slice(3)
+                  .filter(({ control }) => !online || control !== 'interact')
+                  .map(({ control, label, text }) => (
+                    <button
+                      key={control}
+                      type="button"
+                      data-input-control={control}
+                      aria-label={label}
+                    >
+                      {text}
+                    </button>
+                  ))}
                 {progression && (
                   <button
                     type="button"
@@ -305,7 +334,7 @@ export function Playground() {
         {mode === 'multiplayer' ? (
           <p>
             可使用 ←／A、→／D 與 Space 移動及跳躍。站在 Village 或 M1 的傳送門內，按 ↑／W 或觸控 ↑ 往返。按 K
-            或點觸控「能力點數」查看成長與配置 AP。
+            或點觸控「能力點數」查看成長與配置 AP。按 F 或「拾取」撿起附近的個人掉落物，按 1／2 或「HP 藥水」／「MP 藥水」使用藥水。
           </p>
         ) : (
           <>
@@ -452,14 +481,29 @@ export function Playground() {
                 </>
               )}
               {inventory && (
-                <button
-                  className="ap-hud-button"
-                  type="button"
-                  onClick={toggleInventory}
-                >
-                  物品欄（I）
-                </button>
+                <>
+                  <span>金幣 {inventory.currency}</span>
+                  <button
+                    className="ap-hud-button"
+                    type="button"
+                    onClick={toggleInventory}
+                  >
+                    物品欄（I）
+                  </button>
+                </>
               )}
+              <span
+                role="status"
+                aria-label="拾取結果"
+              >
+                {multiplayer.pickupStatus && lootFeedback('pickup', multiplayer.pickupStatus)}
+              </span>
+              <span
+                role="status"
+                aria-label="藥水使用結果"
+              >
+                {multiplayer.consumeStatus && lootFeedback('consume', multiplayer.consumeStatus)}
+              </span>
               {multiplayer.state === 'death' && <span role="status">已倒下，等待返回 Village</span>}
               {multiplayer.spawnProtected && <span role="status">重生保護</span>}
             </>

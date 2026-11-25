@@ -3,6 +3,7 @@ import { createPhysicsStepper, PhysicsValidationError, type Aabb } from '@viesma
 import { initialPhysicsBalance } from '../initial-physics.js'
 import type { MapDefinition } from '../types.js'
 import { invalid, reference } from '../validation.js'
+import { createLootPlacement } from './loot-placement.js'
 import { playerBody } from './objects.js'
 import type { MapCollider, MapMonsterSpawn, NormalizedMap } from './types.js'
 
@@ -120,14 +121,14 @@ export function validateMap(map: NormalizedMap, manifest: MapDefinition, path: s
     if (spawn.movement === 'flight') hasFlyingSpawn = true
   }
   for (const point of map.npcs) clearPoint(point.position, map.colliders, objectPath('npc', point.id))
+  const placement = createLootPlacement(map)
   for (const point of map.lootFallbacks) {
     const pointPath = objectPath('loot', point.id)
-    const { x, y } = point.position
-    clearPoint(point.position, map.colliders, pointPath)
-    const supported = map.colliders.some(({ bounds }) => bounds.origin.y === y && bounds.origin.x < x && x < bounds.origin.x + bounds.width)
-    if (!supported) invalid('INVALID_VALUE', pointPath, 'Loot fallback requires a supporting surface')
+    if (!placement.safe(point.position)) invalid('INVALID_VALUE', pointPath, 'Loot fallback requires a clear supporting surface')
   }
   if (hasFlyingSpawn && map.lootFallbacks.length === 0) {
     invalid('MISSING_FIELD', path, 'A map with a flying MonsterSpawn requires a LootFallback')
   }
+  if (map.monsterSpawns.length > 0 && !placement.fallback)
+    invalid('MISSING_FIELD', path, 'A map with monsters requires a safe loot fallback or player spawn')
 }

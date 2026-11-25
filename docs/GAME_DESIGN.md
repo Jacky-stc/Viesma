@@ -276,6 +276,7 @@ Loot recipients **與 EXP 使用同一 death-time eligible set**，但不按 gro
 - Equip／unequip 驗證目前綁定與版本，沿用活著、接地、未處於其他動作且未掉出地圖的互動條件。轉場期間拒絕新裝備請求。Equip 另驗證 ownership、Beginner 可用、requiredLevel 與 slot type。槽位已有裝備時，舊裝備放回新裝備原 bag slot，因此滿包亦可原子交換。
 - Unequip 需要至少一個空 bag slot；滿包時全數拒絕。Derived stats 重算，HP／MP 只 clamp，不補滿。
 - Consume 在角色 command admission 當下驗證 alive、數值未滿、item 與 cooldown，先保留這次使用的 cooldown，防止並行重複使用。Transaction 從指定 slot／itemInstanceId 減1並記錄唯一 heal effect；commit 後下一 tick 套用一次 restore。失敗 rollback 時釋放保留，不減量。
+- 已提交的藥水效果屬於原 play session 的同一生命。正常 portal 換圖與 grace 重連沿用共用冷卻與該效果，當前權威 body 在下一 tick 接收恢復。死亡、重生換生命或結束 session 時，舊效果以已消耗且未恢復結案，保留原扣量。
 - 已接受的使用若在 DB commit 回覆前遭遇致命傷害，物品仍按成功使用消耗，heal effect 標為已處理但不復活；不回溯 combat。此時顯示「使用完成，角色已死亡」，不能顯示已恢復 HP。這是非同步 transaction 的明確 MVP 預設，M7.4 必須測試；角色已 Death 時送出的新 consume 則直接拒絕。
 - 不提供玩家間 transfer、drop、sell、sort、split、discard、bag expansion 或 equipment durability；stack packing 為 server 自動行為，MVP UI 以 slot 選取操作。
 - 所有 bag／equipment／currency operation 由 authority 計算，附 requestId，重送回傳同結果；client 不可傳送整份 inventory 覆蓋 server。

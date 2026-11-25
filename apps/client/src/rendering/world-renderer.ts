@@ -1,6 +1,6 @@
 import type { GuideDefinition, NormalizedMap } from '@viesma/game-data'
-import type { CombatDamage } from '@viesma/protocol'
-import { Application, Container, Text, type Graphics } from 'pixi.js'
+import type { CombatDamage, GroundLootView } from '@viesma/protocol'
+import { Application, Container, Graphics, Text } from 'pixi.js'
 import catalog from 'virtual:viesma-assets'
 import { createAtlasScope } from './assets/atlas-scope'
 import { indexSprites } from './assets/catalog'
@@ -25,8 +25,25 @@ export interface WorldRenderer {
       readonly peers?: ReadonlyMap<string, PlayerVisualFrame>
       readonly monsters?: ReadonlyMap<string, MonsterVisualFrame>
       readonly damage?: readonly (CombatDamage & { readonly progress: number })[]
+      readonly groundLoot?: ReadonlyMap<string, GroundLootView> | undefined
     }
   ): void
+}
+
+function drawLootIcon({ content }: GroundLootView) {
+  const view = new Graphics()
+  if (content.kind === 'currency') {
+    view.circle(0, -9, 7).fill(0xffd166).stroke({ color: 0x7e4918, width: 2 })
+    return view.circle(0, -9, 3).stroke({ color: 0x9b591d, width: 1 })
+  }
+  if (content.itemDefinitionId === 'hp_potion' || content.itemDefinitionId === 'mp_potion') {
+    view
+      .roundRect(-5, -15, 10, 13, 3)
+      .fill(content.itemDefinitionId === 'hp_potion' ? 0xff697d : 0x75b8ff)
+      .stroke({ color: 0x232948, width: 2 })
+    return view.rect(-3, -18, 6, 4).fill(0xffe4b6)
+  }
+  return view.poly([0, -18, 8, -10, 0, -2, -8, -10]).fill(0xccf2bb).stroke({ color: 0x41634f, width: 2 })
 }
 
 export async function createWorldRenderer(
@@ -81,6 +98,8 @@ export async function createWorldRenderer(
     const monsterViews = new Map<string, ReturnType<typeof createSharedMonsterView>>()
     const damageLayer = new Container()
     const damageViews = new Map<number, Text>()
+    const lootLayer = new Container()
+    let visibleLoot: ReadonlyMap<string, GroundLootView> | undefined
     let mapSprites: ReturnType<typeof createMapSpriteView> | undefined
     function clearRoomSprites() {
       for (const view of peerViews.values()) view.root.destroy({ children: true, context: true })
@@ -89,6 +108,9 @@ export async function createWorldRenderer(
       peerViews.clear()
       monsterViews.clear()
       damageViews.clear()
+      for (const view of lootLayer.removeChildren()) view.destroy({ context: true })
+      visibleLoot = undefined
+      if (diagnostics) delete host.dataset.groundLootSprites
     }
     releaseAssets = () => {
       mapSprites?.destroy()
@@ -97,6 +119,7 @@ export async function createWorldRenderer(
       peers.destroy({ children: true, context: true })
       monsters.destroy({ children: true })
       damageLayer.destroy({ children: true })
+      lootLayer.destroy({ children: true })
       if (diagnostics) {
         delete host.dataset.monsterSprites
         delete host.dataset.peerSprites
@@ -105,7 +128,7 @@ export async function createWorldRenderer(
       }
       entityAssets.destroy()
     }
-    terrain.addChild(monsters, peers, player.root, damageLayer)
+    terrain.addChild(monsters, peers, player.root, lootLayer, damageLayer)
     app.stage.addChild(terrain)
 
     app.canvas.setAttribute('role', 'img')
@@ -150,6 +173,21 @@ export async function createWorldRenderer(
         terrain.scale.set(camera.scale)
         terrain.position.set(-camera.origin.x * camera.scale, -camera.origin.y * camera.scale)
         mapSprites?.draw(frame.visualTick)
+        if (visibleLoot !== frame.groundLoot) {
+          visibleLoot = frame.groundLoot
+          for (const view of lootLayer.removeChildren()) view.destroy({ context: true })
+          const stacks = new Map<string, number>()
+          for (const item of visibleLoot?.values() ?? []) {
+            const { x, y } = item.position
+            const anchor = `${x},${y}`
+            const index = stacks.get(anchor) ?? 0
+            stacks.set(anchor, index + 1)
+            const view = drawLootIcon(item)
+            view.position.set(x, y - index * 16)
+            lootLayer.addChild(view)
+          }
+          if (diagnostics) host.dataset.groundLootSprites = String(lootLayer.children.length)
+        }
         const damageIds = new Set<number>()
         const hurtMonsters = new Set<string>()
         for (const hit of frame.damage ?? []) {

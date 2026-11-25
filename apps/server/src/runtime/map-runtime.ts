@@ -12,6 +12,7 @@ import {
   type PublicMapRoom,
 } from '@viesma/protocol'
 import {
+  applyPlayerVitalEffects,
   clampPlayerVitals,
   createMonsterMovement,
   createPlayer,
@@ -32,6 +33,7 @@ import {
   type SimulationState,
 } from '@viesma/simulation'
 import type { EncounterRewardWorker } from './encounter-reward-worker.ts'
+import type { ConsumableEffect, ConsumableOutcome } from './memory-character-repository.ts'
 import type { InputDecision, MovementTraceSink, WatchMovement } from './movement-trace.ts'
 
 export const mapRoomCapacity = 20
@@ -262,6 +264,15 @@ export function createMapRuntime(
     updatePlayerMaxima(characterId: CharacterId, stats: DerivedCombatStats): void {
       const body = player(characterId)
       if (body) putPlayer(clampPlayerVitals(body, stats))
+    },
+    applyConsumable(characterId: CharacterId, effect: ConsumableEffect, tick: SimulationTick): ConsumableOutcome {
+      // 權威席位包含凍結的來源與 grace 保留的 body。預留席位尚未安裝。
+      const body = !disposed && seats.has(characterId) ? player(characterId) : undefined
+      if (!body || body.lifeStartedTick !== effect.lifeStartedTick) return 'CONSUMED_NO_EFFECT'
+      if (body.action.kind === 'death' || body.vitals.hp <= 0) return 'CONSUMED_DEAD'
+      if (body.physics.inVoid) return 'CONSUMED_NO_EFFECT'
+      putPlayer(applyPlayerVitalEffects(body, [effect], tick))
+      return 'CONFIRMED'
     },
     freeze(connection: object): void {
       const seat = bindings.get(connection)

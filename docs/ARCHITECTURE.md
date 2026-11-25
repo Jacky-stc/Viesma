@@ -192,9 +192,10 @@ Client 以同樣30Hz跑 local physics，render 以 `requestAnimationFrame` 自�
 | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `InputFrame`                              | `protocolVersion, connectionEpoch, mapEpoch, seq, moveX, jumpPressed, attackPressed`                                               | 30Hz；moveX 僅 -1／0／1，jump／attack 為單次 edge；不接收 damage／EXP／absolute position |
 | `InteractPortal`／`InteractNpc`           | `requestId, mapEpoch, objectId`                                                                                                    | Portal 由 Up 按下邊緣發起，server 驗證來源交疊後解析目的地。NPC 由互動按鍵發起。         |
-| `PickupLoot`                              | `requestId, sessionEpoch, mapEpoch, lootId`                                                                                        | 重新驗證 owner、距離、expiry、容量                                                       |
+| `PickupLoot`                              | `protocolVersion, requestId, requestEpoch?, connectionEpoch, mapEpoch, expectedCharacterVersion, lootId`                          | 重新驗證 owner、距離、expiry、容量                                                       |
 | `AllocateAP`                              | `protocolVersion, requestId, connectionEpoch, mapEpoch, expectedCharacterVersion, deltas`                                          | 由目前 socket 綁定辨識本人，驗證角色狀態、版本與整數增量                                 |
-| `EquipItem`／`UnequipItem`／`ConsumeItem` | `requestId, sessionEpoch, itemInstanceId/slot, expectedCharacterVersion`                                                           | version stale 回傳最新 snapshot，不能套用 client bag                                     |
+| `EquipItem`／`UnequipItem`                | 角色指令 envelope 與 `itemInstanceId/slot`                                                                                       | version stale 回傳最新 snapshot，不能套用 client bag                                     |
+| `ConsumeItem`                            | 角色指令 envelope 與 `bagSlot, itemDefinitionId`                                                                                 | 驗證來源 stack、生命、數值、冷卻與角色版本                                                 |
 | `PurchaseItem`（M5.6）                    | `protocolVersion, requestId, sessionEpoch, connectionEpoch, mapEpoch, npcId, itemDefinitionId, quantity, expectedCharacterVersion` | 以 socket 與 session 辨識本人，依權威位置及店點驗證互動，查 server 商品目錄計價          |
 | `PartyCommand`                            | `requestId, type, targetId/inviteId, expectedPartyRevision`                                                                        | PartyService 序列處理；不信任 client roster                                              |
 
@@ -215,6 +216,7 @@ Input seq 在 connection epoch 內單調遞增。Server 拒絕舊 epoch、已見
 - **購買結果（M5.6）**。只有本人收到帶 requestId 的 pending／拒絕／已提交結果。成功後用同一角色版本回報餘額與 bag 更新，換圖或重連由完整 owner view 恢復。
 - **M5.1（protocol 5）**。`OwnerProgression` 綁定 `characterId`、`connectionEpoch` 與 `mapEpoch`，在入房／重連及角色版本變更時傳送全量進度，可附 AP 請求的結案碼。較舊版本的快照不得覆寫已確認資料。
 - **M5.3（protocol 6）**。`OwnerInventory` 沿用同一綁定與 characterVersion，傳送本人全量 bag、equipment、currency，可附裝備操作結案。裝備指令包含來源物品身分與預期版本。AP 與裝備重送以原請求 epoch 和 requestId 識別，傳送時須附目前連線和地圖 epoch。
+- **M5.4（protocol 7）**。`OwnerGroundLoot` 與 `OwnerLootCommandResult` 僅經目前角色綁定的 socket 傳送，另帶 delivery instance ID。匿名 play session 由伺服器的角色路由和目前房間座席辨識。每個 owner／instance 的 `privateRevision` 單調增加，delta 附 `baseRevision`；客戶端以完整 snapshot 起始，跳號時要求全量，遞送交錯時以已接受的 revision 為準。Pickup／consume 共用 AP／裝備的收據範圍。
 - **Party-only messages**：PartyService 對所有 connected members 發送 revisioned full snapshot，包含同／跨 map 的 member 摘要。不同 party 收不到 invite／roster 私有資料。
 
 Personal loot／inventory **不放 public room Schema**；預設用 server 指定 client 的 reliable messages，靠完整 private snapshot 修復斷線，而不是只在畫面過濾。將來若用 StateView 也須有 payload isolation tests；不是目前必需依賴。
@@ -294,6 +296,16 @@ DB 暫不可用時 bounded retry 同一 intent，保留結算中狀態，economy
 M5.3 後的 [PostgreSQL 契約 spike](ROADMAP.md#postgresql-契約-spikem53-後) 使用可拋棄的真資料庫試驗既有 InventoryRepository 及 transaction 語意。正式 schema、Drizzle migrations 與 adapters 自 M7.1 交付。M7.1 依賴 M6.4 定義的 frozen death snapshot、多人 grants／receipts 及 personal ground grants，以便驗證正式資料約束與 parity。
 
 M5.3 的 InventoryRepository 先讀同角色的 receipt key 與 canonical payload fingerprint，再比對預期版本，最後提交角色變更與結案。成功變更使版本加一。無變更的成功或業務拒絕保留版本。收據帶原結果版本，回覆中的全量快照使用當前版本。記憶體 adapter 同步提交，因此 tick 可直接投影結果。PG spike 須驗證同一契約改為非同步 transaction 後，如何按角色排隊、處理 COMMIT 結果不明，並將已提交版本交回固定 tick 投影。
+
+M5.4 沿用 `(characterId, requestEpoch, requestId)`。第一次送出以目前 `connectionEpoch` 作為 `requestEpoch`，重連或轉場重送時保留原 `requestEpoch`、預期角色版本與業務欄位。新 socket 只能為同一伺服器持有的角色 session 查回已存在的舊收據。拾取以角色權威腳底中心計算歐氏距離。在同一記憶體提交回合更新背包或錢包、將地面紀錄改為 `PICKED` 並寫入收據，提交點再次檢查 UTC 到期時間。`EXPIRED` 與 `PICKED` 為終態。合法重送回原結果，較舊的背包版本不能覆蓋目前快照。
+
+M5.4 在 world tick 的路由交接與角色命令階段處理消耗品。Admission 保留以當下 tick 起算的 30-tick 共用冷卻。記憶體提交成功時，收據包含扣量與待處理的效果。下一個 fixed tick 先處理路由交接，再對原 play session 的當前權威 body 檢查 `characterId`、`lifeStartedTick` 與存活，並在角色與怪物步進前依當下 HP／MP 上限套用一次。正常 portal 換圖與 grace 重連沿用 session、生命與冷卻。交接前效果可套用至來源 body，交接後由目的 body 承接。原生命死亡或已替換、session 關閉時結案為已消耗且未恢復，保留原扣量。失敗提交釋放保留。
+
+`connectionEpoch` 與 `mapEpoch` 用於新指令與私人訊息授權。藥水結案由原收據記錄，伺服器透過當前授權的 socket 送出結果，並帶原 `requestEpoch`。Grace 期間可先在保留的 body 套用效果並結案，重連後以相同收據重送查回原結果。
+
+地面紀錄使用 M5.2 原始來源與 payload，expiry 由成功 reward commit 的 UTC 時間加 120 秒。記憶體中的 delivery instance 平時跟隨原始房間。當原房間已釋放，角色成功轉入相同地圖時可將未過期紀錄綁到新的 instance，保留落點與 expiry。程序重啟後的重建與 rebind 屬 M7。
+
+M5.5 在同一記憶體 reward transaction 內，以 frozen death intent 抽取一次，從成功提交的 UTC 時間計算 expiresAt，將 committed grants 傳給 `ground.prepareDelivery(grants, claim.mapId, claim.mapInstanceId, committedAtUtcMilliseconds)`。取得的發布函式與 EXP／level／AP 和 reward receipt 共用同一提交回合。來源 instance 已釋放且 owner 已在相同地圖時，可在發布後以 `ground.rebind` 更新 delivery instance。交易全數成功後才由目前 owner 綁定送出私人投影，並使怪物離開 `RewardPending`。M5.4 的 fixture 以伺服器內部的 `deliverCommittedGroundLoot` 驗證既有 M5.2 收據。
 
 ### 8.1 初始 logical schema
 
