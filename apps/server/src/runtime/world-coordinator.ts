@@ -41,7 +41,6 @@ import {
   type TransferOffer,
 } from '@viesma/protocol'
 import {
-  allocateSoloExperience,
   canUseGroundedInteraction,
   createFixedTickDriver,
   findOverlappingPortal,
@@ -61,8 +60,10 @@ import { createEncounterRewardWorker, type EncounterRewardPort } from './encount
 import { createGroundLootStore, type CommittedLootRoll, type GroundLootState } from './ground-loot.ts'
 import { createMapRuntime, type MapRuntime } from './map-runtime.ts'
 import { createMemoryCharacterRepository, type ConsumableEffect } from './memory-character-repository.ts'
+import { createMemoryPersonalLootRepository, type EncounterRewardReceipt } from './memory-personal-loot.ts'
 import { getMonsterSpawnDefinitions } from './monster-spawns.ts'
 import type { WatchMovement } from './movement-trace.ts'
+import { soloRewardRecipients, type LootRollRng } from './personal-loot.ts'
 
 interface WorldDependencies {
   readonly clock: MonotonicClock
@@ -72,7 +73,8 @@ interface WorldDependencies {
   readonly onBacklogRecovered?: (recoveryMilliseconds: number, catchUpTicks: number) => void
   readonly createDestination?: (mapId: OnlineMapId) => Promise<unknown>
   readonly partyMembership?: (characterId: CharacterId) => PartyMembership | undefined
-  readonly rewardPort?: EncounterRewardPort
+  readonly wrapRewardPort?: (memory: EncounterRewardPort) => EncounterRewardPort
+  readonly rewardRandom?: LootRollRng
   readonly watchMovement?: WatchMovement
   readonly nowUtcMilliseconds?: () => number
   readonly characterRepositoryFactory?: typeof createMemoryCharacterRepository
@@ -209,7 +211,24 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     },
     characterRepositoryFactory(data.items, { store: ground, nowUtcMilliseconds })
   )
-  const rewards = createEncounterRewardWorker(dependencies.rewardPort, prepareSoloReward)
+  const memoryRewards = createMemoryPersonalLootRepository(
+    data,
+    characters,
+    ground,
+    (mapId, spawnId) => {
+      const definitions = mapId === maps.m1.id ? monsterSpawns.m1.definitions : monsterSpawns.village.definitions
+      return definitions.find((spawn) => spawn.spawnId === spawnId)?.baseExp ?? 0
+    },
+    {
+      nowUtcMilliseconds,
+      ...(dependencies.rewardRandom && { randomForEntry: dependencies.rewardRandom }),
+    }
+  )
+  const rewards = createEncounterRewardWorker(
+    dependencies.wrapRewardPort?.(memoryRewards) ?? memoryRewards,
+    ({ groups }) => characters.retainReward(soloRewardRecipients(groups)),
+    applyRewardCompletion
+  )
   const combat = {
     playerStats: (characterId: CharacterId) => {
       const character = characters.read(characterId)
@@ -235,25 +254,35 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
   let lastBacklogRecoveryMilliseconds: number | undefined
   let instanceSequence = 0
   let catchingUp = false
+  let rewardSequence = 0
 
   const canAdmit = () => backlogTicks === 0 && !catchingUp
   const registered = (room: MapRuntime) => rooms.get(room.mapInstanceId) === room
 
-  function prepareSoloReward({ claim, groups }: EncounterRewardIntent) {
-    const { deathId, mapId, spawnId } = claim
-    const definitions = mapId === maps.m1.id ? monsterSpawns.m1.definitions : monsterSpawns.village.definitions
-    const baseExp = definitions.find((spawn) => spawn.spawnId === spawnId)?.baseExp
-    const grants = allocateSoloExperience(baseExp ?? 0, groups).flatMap(({ characterId, exp }) => {
-      const commit = routes.has(characterId) && characters.retainExperience(characterId, deathId, exp)
-      return commit ? [commit] : []
-    })
-    return () =>
-      Object.freeze(
-        grants.flatMap((commit) => {
-          const version = commit()
-          return version ? [version] : []
-        })
-      )
+  function applyRewardCompletion({ claim }: EncounterRewardIntent, receipt: EncounterRewardReceipt) {
+    const sequence = ++rewardSequence
+    const grantCounts = new Map<CharacterId, number>()
+    for (const { ownerCharacterId } of receipt.grants) {
+      grantCounts.set(ownerCharacterId, (grantCounts.get(ownerCharacterId) ?? 0) + 1)
+    }
+    for (const { characterId, experience, levelsGained } of receipt.recipients) {
+      const route = routes.get(characterId)
+      const aggregate = characters.read(characterId)
+      if (!route || !aggregate) continue
+      route.room.updatePlayerMaxima(characterId, characters.stats(aggregate))
+      const lootCount = grantCounts.get(characterId) ?? 0
+      if (lootCount && route.room.map.id === claim.mapId && !rooms.has(claim.mapInstanceId)) {
+        ground.rebind(characterId, claim.mapId, route.room.mapInstanceId, (id) => rooms.has(id), nowUtcMilliseconds)
+      }
+      const peer = route.peer
+      const binding = peer && route.room.binding(peer.connection)
+      if (!peer || !binding || (!experience && !lootCount)) continue
+      try {
+        peer.progression?.({ ...progressionSnapshot(route, binding), reward: { sequence, experience, levelsGained, lootCount } })
+      } catch {
+        // 獎勵已提交。私人快照可恢復進度，通知失敗不影響怪物生命週期。
+      }
+    }
   }
 
   function progressionSnapshot(route: CharacterRoute, binding: MapRoomJoin, result?: OwnerProgression['result']): OwnerProgression {
@@ -899,7 +928,9 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     },
     deliverCommittedGroundLoot(room: MapRuntime, grants: readonly CommittedLootRoll[]): void {
       if (!registered(room)) throw new RangeError('Ground delivery requires a registered source room')
-      ground.prepareDelivery(grants, room.map.id, room.mapInstanceId, nowUtcMilliseconds())()
+      const delivery = ground.prepareDelivery(grants, room.map.id, room.mapInstanceId, nowUtcMilliseconds())
+      delivery.validate()
+      delivery.publish()
     },
     ownerGroundLoot(room: MapRuntime, connection: object, previous?: GroundLootFeed, refresh?: unknown) {
       const route = connections.get(connection)

@@ -494,6 +494,19 @@ export function Playground() {
               )}
               <span
                 role="status"
+                aria-label="戰鬥獎勵"
+              >
+                {multiplayer.reward &&
+                  [
+                    multiplayer.reward.experience > 0 && `EXP +${multiplayer.reward.experience}`,
+                    multiplayer.reward.levelsGained > 0 && `升級 +${multiplayer.reward.levelsGained}`,
+                    multiplayer.reward.lootCount > 0 && `個人掉落 ${multiplayer.reward.lootCount} 筆`,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+              </span>
+              <span
+                role="status"
                 aria-label="拾取結果"
               >
                 {multiplayer.pickupStatus && lootFeedback('pickup', multiplayer.pickupStatus)}

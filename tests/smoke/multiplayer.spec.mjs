@@ -1157,6 +1157,156 @@ async function joinProgression(page, fixture) {
   return { seat, hud, authority }
 }
 
+test('plays the solo combat loop from an authoritative kill through rewards, recovery and retained progression', async ({
+  page,
+  browser,
+  baseURL,
+}) => {
+  test.slow()
+  const allowCommit = Promise.withResolvers()
+  const rewards = []
+  const fixture = await startBrowserFixtureServer({
+    soloLoopScenario: true,
+    beforeReward: () => allowCommit.promise,
+    observeReward: (_intent, receipt) => rewards.push(receipt),
+  })
+  const observer = await browser.newPage({ baseURL, viewport: { width: 667, height: 375 }, isMobile: true, hasTouch: true })
+  const observerPackets = []
+  let ownerSocket
+  let rewardPacket
+  try {
+    await page.routeWebSocket(
+      ({ host }) => host === fixture.address,
+      (socket) => {
+        ownerSocket = socket
+        const server = socket.connectToServer()
+        server.onMessage((message) => {
+          if (Buffer.isBuffer(message) && message.includes('OwnerProgression') && message.includes('lootCount')) rewardPacket = message
+          socket.send(message)
+        })
+      }
+    )
+    await observer.routeWebSocket(
+      ({ host }) => host === fixture.address,
+      (socket) => {
+        const server = socket.connectToServer()
+        server.onMessage((message) => {
+          if (Buffer.isBuffer(message)) observerPackets.push(message)
+          socket.send(message)
+        })
+      }
+    )
+    const travel = await routeFixtureTravel(page, fixture)
+    const { seat, authority, hud } = await joinProgression(page, fixture)
+    const other = await joinProgression(observer, fixture)
+    expect(other.seat.roomId).toBe(seat.roomId)
+    await expect(page.getByLabel('目前地圖')).toHaveText('Forest Entrance')
+    const surface = page.getByLabel('平台測試場')
+    const stage = page.locator('.playground-canvas')
+    const feedback = page.getByRole('status', { name: '戰鬥獎勵' })
+
+    fixture.setLootVitals(seat, { hp: 37 })
+    await expect(hud).toContainText('HP 37 / 50')
+    await surface.focus()
+    await page.keyboard.press('j')
+    await expect
+      .poll(async () => (await monsterProjection(page)).monsters[0])
+      .toMatchObject({
+        generation: 1,
+        hp: 0,
+        state: 'rewardPending',
+      })
+    await expect(hud).toContainText('Lv. 1')
+    await expect(feedback).toBeEmpty()
+    await expect(stage).toHaveAttribute('data-ground-loot-sprites', '0')
+    expect(rewards).toEqual([])
+    allowCommit.resolve()
+    await expect(feedback).toHaveText('EXP +100 · 升級 +1 · 個人掉落 3 筆')
+    await expect(hud).toContainText('Lv. 2')
+    await expect(hud).toContainText('可用 AP 5')
+    await expect(hud).toContainText('HP 37 / 60')
+    await expect(stage).toHaveAttribute('data-ground-loot-sprites', '3')
+    await expect(observer.locator('.playground-canvas')).toHaveAttribute('data-ground-loot-sprites', '0')
+    await expect(observer.getByRole('status', { name: '戰鬥獎勵' })).toBeEmpty()
+    expect(rewards[0].recipients).toMatchObject([{ characterId: authority.characterId, experience: 100, version: 1 }])
+    expect(rewardPacket).toBeDefined()
+    ownerSocket.send(rewardPacket)
+    expect(observerPackets.some((message) => message.includes('lootCount'))).toBe(false)
+    for (const { lootId } of rewards[0].grants) expect(observerPackets.some((message) => message.includes(lootId))).toBe(false)
+
+    for (let remaining = 2; remaining >= 0; remaining--) {
+      await page.keyboard.press('f')
+      await expect(stage).toHaveAttribute('data-ground-loot-sprites', String(remaining))
+    }
+    const inventory = fixture.inventoryAt(seat)
+    expect(inventory).toMatchObject({ currency: 3, characterVersion: 4 })
+    expect(inventory.bag[0]).toMatchObject({ itemDefinitionId: 'hp_potion', quantity: 6 })
+    expect(inventory.bag[2]).toMatchObject({ itemDefinitionId: 'accessory_tier_1', quantity: 1 })
+    await expect(hud).toContainText('金幣 3')
+
+    await page.keyboard.press('k')
+    const ap = page.getByRole('dialog', { name: '能力點數' })
+    await ap.getByRole('spinbutton', { name: 'STR 配置' }).fill('1')
+    await ap.getByRole('button', { name: '配置 AP' }).click()
+    await expect(ap.getByRole('status')).toHaveText('能力點數已配置')
+    await page.keyboard.press('k')
+    await page.keyboard.press('i')
+    const bag = page.getByRole('dialog', { name: '物品欄' })
+    await bag.getByRole('button', { name: /^背包槽 3 · / }).click()
+    await bag.getByRole('button', { name: '裝備物品' }).click()
+    await expect(bag.getByRole('status')).toHaveText('裝備已更新')
+    await page.keyboard.press('i')
+    expect(fixture.progressionAt(seat)).toMatchObject({
+      characterVersion: 6,
+      unspentAp: 4,
+      baseAttributes: { str: 5 },
+      stats: { attackPower: 25, maxHp: 70 },
+    })
+    await expect(hud).toContainText('HP 37 / 70')
+    await surface.focus()
+    await page.keyboard.press('1')
+    await expect(page.getByRole('status', { name: '藥水使用結果' })).toHaveText('已使用藥水')
+    await expect(hud).toContainText('HP 70 / 70')
+    expect(fixture.inventoryAt(seat).bag[0].quantity).toBe(5)
+
+    fixture.advanceWorldTicks(331)
+    await expect.poll(async () => (await monsterProjection(page)).monsters[0]).toMatchObject({ generation: 2, state: 'patrol' })
+    await page.keyboard.press('j')
+    await expect(hud).toContainText('EXP 100 / 300')
+    await expect(feedback).toHaveText('EXP +100 · 個人掉落 3 筆')
+    await expect(stage).toHaveAttribute('data-ground-loot-sprites', '3')
+    const previousRewardPacket = rewardPacket
+    expect(fixture.drop(seat)).toBe(true)
+    await expect(stage).toHaveAttribute('data-multiplayer-scene-revision', '2')
+    const rebound = travel()
+    expect(rebound.sessionId).not.toBe(seat.sessionId)
+    await expect(feedback).toBeEmpty()
+    await expect(stage).toHaveAttribute('data-ground-loot-sprites', '3')
+    ownerSocket.send(previousRewardPacket)
+    await expect(hud).toContainText('EXP 100 / 300')
+    await expect(feedback).toBeEmpty()
+    expect(fixture.progressionAt(rebound)).toMatchObject({ characterId: authority.characterId, characterVersion: 8, unspentAp: 4 })
+    expect(fixture.inventoryAt(rebound)).toMatchObject({ currency: 3, equipment: { accessory: { itemDefinitionId: 'accessory_tier_1' } } })
+
+    fixture.advanceWorldTicks(331)
+    await expect.poll(async () => (await monsterProjection(page)).monsters[0]).toMatchObject({ generation: 3, state: 'patrol' })
+    expect(fixture.approachSlime(rebound)).toBe(true)
+    await expect(hud).toContainText('已倒下，等待返回 Village')
+    await expect(hud).toContainText('HP 0 / 70')
+    fixture.advanceWorldTicks(90)
+    await expect(page.getByLabel('目前地圖')).toHaveText('Village')
+    await expect(hud).toContainText('HP 70 / 70')
+    await expect(hud).toContainText('Lv. 2')
+    await expect(stage).toHaveAttribute('data-ground-loot-sprites', '0')
+    expect(fixture.inventoryAt(travel())).toMatchObject({ characterId: authority.characterId, characterVersion: 8, currency: 3 })
+    expect(rewards).toHaveLength(2)
+  } finally {
+    allowCommit.resolve()
+    await observer.close()
+    await fixture.close()
+  }
+})
+
 test('shows private progression, waits for authority, and opens the AP panel with keyboard and landscape touch', async ({
   page,
   browser,

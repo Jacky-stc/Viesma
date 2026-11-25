@@ -2,7 +2,6 @@ import { loadGrayboxGameData } from '@viesma/game-data'
 import { fixedDeltaSeconds } from '@viesma/simulation'
 import { setImmediate } from 'node:timers/promises'
 import { expect, test } from 'vitest'
-import { createMemoryEncounterRewardPort } from '../src/runtime/encounter-reward-worker.ts'
 import { createMapRuntime } from '../src/runtime/map-runtime.ts'
 import { getMonsterSpawnDefinitions } from '../src/runtime/monster-spawns.ts'
 import { createWorldCoordinator } from '../src/runtime/world-coordinator.ts'
@@ -63,7 +62,6 @@ test('four owners land shared hits in stable order, including concurrent lethal 
   let id = 0
   const commits = []
   const released = []
-  const memory = createMemoryEncounterRewardPort()
   const world = createWorldCoordinator(sharedCombatData(), 'hash', {
     clock: { nowMilliseconds: () => tick * tickMilliseconds + (tick ? 0.0001 : 0) },
     nextId: () => `scenario-${String(++id).padStart(4, '0')}`,
@@ -74,7 +72,7 @@ test('four owners land shared hits in stable order, including concurrent lethal 
         wake = undefined
       }
     },
-    rewardPort: {
+    wrapRewardPort: (memory) => ({
       commitReward(intent) {
         const receipt = memory.commitReward(intent)
         commits.push({ intent, receipt })
@@ -84,7 +82,7 @@ test('four owners land shared hits in stable order, including concurrent lethal 
         released.push(deathId)
         memory.releaseReceipt(deathId)
       },
-    },
+    }),
   })
   const room = world.createRoom()
   const isolated = world.createRoom()
@@ -173,7 +171,9 @@ test('four owners land shared hits in stable order, including concurrent lethal 
       expect(claimedDeaths.has(intent.claim.deathId)).toBe(false)
       claimedEncounters.add(intent.claim.encounterId)
       claimedDeaths.add(intent.claim.deathId)
-      expect(receipt).toMatchObject({ deathId: intent.claim.deathId, resultingVersions: [] })
+      expect(receipt.deathId).toBe(intent.claim.deathId)
+      expect(receipt.resultingVersions).toHaveLength(4)
+      expect(receipt.recipients.reduce((total, { experience }) => total + experience, 0)).toBe(40)
       expect(entrySlime(room).state).toBe('rewardPending')
       step()
       expect(entrySlime(room).state).toBe('dead')
@@ -201,7 +201,7 @@ test('four owners land shared hits in stable order, including concurrent lethal 
 test('rehearses two full endurance cycles with a fixed clock and stops the scheduler on disposal', async () => {
   let tick = 0
   let wake
-  const loop = createSharedCombatLoop(createWorldCoordinator, createMemoryEncounterRewardPort(), {
+  const loop = createSharedCombatLoop(createWorldCoordinator, {
     clock: { nowMilliseconds: () => tick * tickMilliseconds + (tick ? 0.0001 : 0) },
     onBacklog: (backlog) => expect(backlog).toBe(0),
     schedule(callback) {

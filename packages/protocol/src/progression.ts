@@ -37,6 +37,12 @@ export interface OwnerProgression extends MapRoomJoin {
   readonly unspentAp: number
   readonly baseAttributes: Attributes
   readonly stats: DerivedCombatStats
+  readonly reward?: {
+    readonly sequence: number
+    readonly experience: number
+    readonly levelsGained: number
+    readonly lootCount: number
+  }
   readonly result?: { readonly requestId: number; readonly requestEpoch?: string; readonly code: ApResultCode }
 }
 
@@ -138,6 +144,22 @@ export function parseOwnerProgression(value: unknown): OwnerProgression | undefi
     return undefined
   if (nextLevelExp === null ? expWithinLevel !== 0 : nextLevelExp <= expWithinLevel) return undefined
   const snapshot = { ...binding, protocolVersion, characterVersion, level, expWithinLevel, nextLevelExp, unspentAp, baseAttributes, stats }
+  if (Object.hasOwn(fields, 'reward')) {
+    const reward = readRecord(fields.reward)
+    const { sequence, experience, levelsGained, lootCount } = reward ?? {}
+    if (
+      Object.hasOwn(fields, 'result') ||
+      !isNonNegativeSafeInteger(sequence) ||
+      !isNonNegativeSafeInteger(experience) ||
+      !isNonNegativeSafeInteger(levelsGained) ||
+      !isNonNegativeSafeInteger(lootCount) ||
+      sequence === 0 ||
+      levelsGained > level - 1 ||
+      (experience === 0 && (levelsGained !== 0 || lootCount === 0))
+    )
+      return undefined
+    return { ...snapshot, reward: { sequence, experience, levelsGained, lootCount } }
+  }
   if (!Object.hasOwn(fields, 'result')) return snapshot
   const result = readRecord(fields.result)
   const { requestId, requestEpoch, code } = result ?? {}

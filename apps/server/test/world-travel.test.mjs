@@ -3,7 +3,6 @@ import { PROTOCOL_VERSION } from '@viesma/protocol'
 import { findOverlappingPortal } from '@viesma/simulation'
 import { setImmediate } from 'node:timers/promises'
 import { expect, test, vi } from 'vitest'
-import { createMemoryEncounterRewardPort } from '../src/runtime/encounter-reward-worker.ts'
 import { createWorldCoordinator } from '../src/runtime/world-coordinator.ts'
 import { movementSmokeData, movementSmokeMaxPlayerX } from './movement-smoke-fixture.mjs'
 import { combatPeer, sendCombatInput } from './shared-combat-fixture.mjs'
@@ -298,13 +297,15 @@ function rewardHarness(createCommit = (memory) => vi.fn(memory.commitReward)) {
         }
       : map
   )
-  const memory = createMemoryEncounterRewardPort()
-  const rewardPort = { commitReward: createCommit(memory), releaseReceipt: vi.fn(memory.releaseReceipt) }
+  let rewardPort
   const h = harness(
     undefined,
     { ...data, tiledMaps },
     {
-      rewardPort,
+      wrapRewardPort(memory) {
+        rewardPort = { commitReward: createCommit(memory), releaseReceipt: vi.fn(memory.releaseReceipt) }
+        return rewardPort
+      },
       partyMembership: (id) => ({ kind: 'party', partyId: 'shared', membershipToken: `tenure:${id}` }),
     }
   )

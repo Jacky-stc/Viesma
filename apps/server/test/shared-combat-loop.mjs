@@ -1,9 +1,10 @@
 import { initialMonsterAiBalance } from '@viesma/game-data'
-import { maxCombatDamageAgeTicks, maxCombatDamageEvents } from '@viesma/protocol'
+import { maxCombatDamageAgeTicks, maxCombatDamageEvents, PROTOCOL_VERSION } from '@viesma/protocol'
+import { allocateSoloExperience } from '@viesma/simulation'
 import assert from 'node:assert/strict'
 import { combatPeer, entrySlime, sendCombatInput, sharedCombatData } from './shared-combat-fixture.mjs'
 
-export function createSharedCombatLoop(createWorldCoordinator, memory, dependencies) {
+export function createSharedCombatLoop(createWorldCoordinator, dependencies) {
   const data = sharedCombatData()
   const stats = {
     cycles: 0,
@@ -19,6 +20,10 @@ export function createSharedCombatLoop(createWorldCoordinator, memory, dependenc
     returnResets: 0,
     rewardCommits: 0,
     rewardReleases: 0,
+    rewardExperience: 0,
+    rewardGroundGrants: 0,
+    rewardPrivateChecks: 0,
+    rewardPickups: 0,
     maxPendingIntents: 0,
     maxRetainedReceipts: 0,
     maxRecentDamageEvents: 0,
@@ -35,17 +40,28 @@ export function createSharedCombatLoop(createWorldCoordinator, memory, dependenc
   const world = createWorldCoordinator(data, 'shared-combat-fixture', {
     ...dependencies,
     nextId: () => `loop-${String(++nextId).padStart(6, '0')}`,
-    rewardPort: {
+    rewardRandom: () => (bound) => bound - 1,
+    wrapRewardPort: (memory) => ({
       commitReward(intent) {
         const { deathId } = intent.claim
         const receipt = memory.commitReward(intent)
         assert.equal(receipts.has(deathId), false, 'unexpected reward retry in the healthy loop')
         assert.equal(receipt.deathId, deathId)
-        assert.deepEqual(receipt.resultingVersions, [])
         assert.equal(
           intent.groups.reduce((sum, group) => sum + group.effectiveDamage, 0),
           initialSlime.maxHp
         )
+        const allocated = allocateSoloExperience(40, intent.groups)
+        for (const { characterId, exp } of allocated) {
+          assert.equal(receipt.recipients.find((recipient) => recipient.characterId === characterId)?.experience, exp)
+        }
+        assert.equal(receipt.grants.length, receipt.recipients.length)
+        for (const { expiresAtUtcMilliseconds, content } of receipt.grants) {
+          assert.equal(expiresAtUtcMilliseconds, receipt.committedAtUtcMilliseconds + 120_000)
+          assert.equal(content.kind, 'currency')
+        }
+        stats.rewardExperience += receipt.recipients.reduce((sum, { experience }) => sum + experience, 0)
+        stats.rewardGroundGrants += receipt.grants.length
         receipts.set(deathId, receipt)
         stats.rewardCommits++
         stats.maxRetainedReceipts = Math.max(stats.maxRetainedReceipts, receipts.size)
@@ -56,7 +72,7 @@ export function createSharedCombatLoop(createWorldCoordinator, memory, dependenc
         stats.rewardReleases++
         memory.releaseReceipt(deathId)
       },
-    },
+    }),
   })
   const m1 = world.createRoom('m1')
   const village = world.createRoom('village')
@@ -72,6 +88,7 @@ export function createSharedCombatLoop(createWorldCoordinator, memory, dependenc
   let lastHurtTick
   const hurtActors = new Set()
   let corpseTick
+  let pickup
   let pendingIntents = 0
 
   function join() {
@@ -234,14 +251,53 @@ export function createSharedCombatLoop(createWorldCoordinator, memory, dependenc
         stats.monsterDeaths++
         transition('waitForRespawn')
       } else if (phase === 'waitForRespawn' && slime.state === 'dead') {
-        corpseTick ??= tick
         assert.equal(receipts.size, 1)
+        if (corpseTick === undefined) {
+          corpseTick = tick
+          const [receipt] = receipts.values()
+          for (const { peer } of actors) {
+            const { characterId, connectionEpoch, mapEpoch } = peer.session
+            const ownGrant = receipt.grants.find((grant) => grant.ownerCharacterId === characterId)
+            const view = world.ownerGroundLoot(m1, peer.connection).update.loot
+            const current = view.filter(({ lootId }) => receipt.grants.some((grant) => grant.lootId === lootId))
+            assert.deepEqual(
+              current.map(({ lootId }) => lootId),
+              ownGrant ? [ownGrant.lootId] : []
+            )
+            stats.rewardPrivateChecks++
+            if (!ownGrant || pickup) continue
+            const { characterVersion, currency } = world.inventory(m1, peer.connection)
+            world.requestGroundLoot(
+              m1,
+              peer.connection,
+              {
+                protocolVersion: PROTOCOL_VERSION,
+                connectionEpoch,
+                mapEpoch,
+                requestId: stats.cycles + 1,
+                expectedCharacterVersion: characterVersion,
+                lootId: ownGrant.lootId,
+              },
+              'pickup'
+            )
+            pickup = { peer, characterVersion, currency: currency + ownGrant.content.amount, lootId: ownGrant.lootId }
+          }
+          assert.ok(pickup)
+        } else if (pickup) {
+          const { peer, currency, characterVersion, lootId } = pickup
+          assert.equal(world.inventory(m1, peer.connection).currency, currency)
+          assert.equal(world.inventory(m1, peer.connection).characterVersion, characterVersion + 1)
+          assert.ok(world.ownerGroundLoot(m1, peer.connection).update.loot.every((entry) => entry.lootId !== lootId))
+          stats.rewardPickups++
+          pickup = undefined
+        }
       } else if (phase === 'waitForRespawn' && slime.generation === stats.monsterRespawns + 2) {
         assert.ok(
           corpseTick !== undefined &&
             tick - corpseTick >= initialMonsterAiBalance.corpseTicks + initialMonsterAiBalance.respawnWaitTicks - 4
         )
         assert.equal(receipts.size, 0)
+        assert.equal(pickup, undefined)
         assert.equal(slime.hp, slime.maxHp)
         corpseTick = undefined
         stats.monsterRespawns++
@@ -263,10 +319,13 @@ export function createSharedCombatLoop(createWorldCoordinator, memory, dependenc
         'returnResets',
         'rewardCommits',
         'rewardReleases',
+        'rewardPickups',
       ]) {
         assert.equal(stats[key], cycles, key)
       }
       assert.equal(stats.joins, cycles + 4)
+      assert.equal(stats.rewardPrivateChecks, cycles * 4)
+      assert.ok(stats.rewardGroundGrants >= cycles && stats.rewardExperience > 0)
       assert.ok(stats.playerDamage >= 2 * cycles && stats.monsterDamage >= 2 * cycles)
       assert.ok(stats.monsterAttackStarts >= 2 * cycles && stats.patrolMovementTicks > 0 && stats.chaseMovementTicks > 0)
       assert.ok(hurtActors.size >= Math.min(cycles, 2))

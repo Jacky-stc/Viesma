@@ -1,18 +1,14 @@
 import { PROTOCOL_VERSION } from '@viesma/protocol'
-import { Buffer } from 'node:buffer'
-import { createSecretKey } from 'node:crypto'
 import { setImmediate } from 'node:timers/promises'
 import { expect, test, vi } from 'vitest'
-import { createMemoryEncounterRewardPort } from '../src/runtime/encounter-reward-worker.ts'
-import { createServerLootRng } from '../src/runtime/loot-rng.ts'
-import { createMemoryPersonalLootRepository } from '../src/runtime/memory-personal-loot.ts'
+import { createMemoryCharacterRepository } from '../src/runtime/memory-character-repository.ts'
 import { createWorldCoordinator } from '../src/runtime/world-coordinator.ts'
 import { progressionTestData } from './progression-fixture.mjs'
 import { combatPeer, sendCombatInput } from './shared-combat-fixture.mjs'
 
 const zero = { str: 0, dex: 0, int: 0, luk: 0 }
 
-function harness(rewardPort) {
+function harness(wrapRewardPort, dependencies = {}) {
   let tick = 0
   let wake
   let id = 0
@@ -26,7 +22,9 @@ function harness(rewardPort) {
         wake = undefined
       }
     },
-    rewardPort,
+    wrapRewardPort,
+    rewardRandom: () => () => 0,
+    ...dependencies,
   })
   const m1 = world.createRoom('m1')
   function peer() {
@@ -70,65 +68,58 @@ function harness(rewardPort) {
   return { world, m1, peer, join, advance, snapshot, body, payload, request, attack, expectResult, running: () => Boolean(wake) }
 }
 
-test('settles loot from a real frozen death intent without changing M5.1 progression or sending loot or its secret', async () => {
-  const memory = createMemoryEncounterRewardPort()
-  const port = { ...memory, commitReward: vi.fn(memory.commitReward) }
-  const h = harness(port)
+test('settles a real frozen death and publishes rewards only to the owner', async () => {
+  let port
+  const h = harness((memory) => (port = { ...memory, commitReward: vi.fn(memory.commitReward) }))
   const owner = h.join()
   const observer = h.join()
   await h.advance()
   h.attack(owner)
   await h.advance(8)
   const [[intent]] = port.commitReward.mock.calls
+  const [{ value: receipt }] = port.commitReward.mock.results
   expect(Object.isFrozen(intent)).toBe(true)
   expect(intent.groups[0].eligibleCharacterIds).toEqual([owner.session.characterId])
   expect(h.snapshot(owner)).toMatchObject({ level: 2, characterVersion: 1 })
   expect(h.snapshot(observer)).toMatchObject({ level: 1, characterVersion: 0 })
-
-  const secret = 'synthetic m52 server secret'
-  const randomForEntry = createServerLootRng(createSecretKey(Buffer.from(secret, 'utf8')))
-  const repository = createMemoryPersonalLootRepository({ randomForEntry, nowUtcMilliseconds: () => 1_795_000_000_000 })
-  const worldViews = () => ({
-    publicState: h.m1.snapshot(),
-    ownerView: h.snapshot(owner),
-    observerView: h.snapshot(observer),
-    ownerProgressionMessages: owner.progression.mock.calls,
-    observerProgressionMessages: observer.progression.mock.calls,
-  })
-  const before = globalThis.structuredClone(worldViews())
-  const receipt = repository.commitReward(intent, progressionTestData())
-  expect(worldViews()).toEqual(before)
-  expect(new Set(receipt.grants.map(({ ownerCharacterId }) => ownerCharacterId))).toEqual(new Set([owner.session.characterId]))
-  expect(receipt.grants.find(({ tableEntryId }) => tableEntryId === 'currency').content.kind).toBe('currency')
-  const serializedViews = JSON.stringify(worldViews())
-  for (const { lootId } of receipt.grants) {
-    expect(serializedViews).not.toContain(JSON.stringify(lootId))
-  }
-  expect(JSON.stringify({ receipt, views: worldViews() })).not.toContain(secret)
+  const loot = (peer) => h.world.ownerGroundLoot(h.m1, peer.connection).update.loot
+  expect(
+    loot(owner)
+      .map(({ lootId }) => lootId)
+      .sort()
+  ).toEqual(receipt.grants.map(({ lootId }) => lootId).sort())
+  expect(loot(observer)).toEqual([])
+  expect(observer.progression).not.toHaveBeenCalled()
+  expect(owner.progression).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      reward: { sequence: 1, experience: 100, levelsGained: 1, lootCount: receipt.grants.length },
+    })
+  )
+  const unrelated = JSON.stringify([h.m1.snapshot(), h.snapshot(observer), loot(observer)])
+  for (const { lootId } of receipt.grants) expect(unrelated).not.toContain(JSON.stringify(lootId))
   h.world.disposeRoom(h.m1)
-  expect(repository.findCommittedReward(intent.claim.deathId)).toBe(receipt)
 })
 
 test('settles solo EXP once after lost acknowledgements, source disposal, transfer and reconnect', async () => {
   const gate = Promise.withResolvers()
-  const memory = createMemoryEncounterRewardPort()
-  const port = {
-    releaseReceipt: vi.fn(memory.releaseReceipt),
-    commitReward: vi
-      .fn()
-      .mockImplementationOnce(() => {
-        throw new Error('before commit')
+  let port
+  const h = harness(
+    (memory) =>
+      (port = {
+        releaseReceipt: vi.fn(memory.releaseReceipt),
+        commitReward: vi
+          .fn()
+          .mockImplementationOnce(() => {
+            throw new Error('before commit')
+          })
+          .mockImplementationOnce(async (intent) => {
+            await gate.promise
+            memory.commitReward(intent)
+            throw new Error('acknowledgement lost')
+          })
+          .mockImplementation(memory.commitReward),
       })
-      .mockImplementationOnce((intent) => {
-        memory.commitReward(intent)
-        return Promise.reject(new Error('acknowledgement lost'))
-      })
-      .mockImplementation(async (intent) => {
-        await gate.promise
-        return memory.commitReward(intent)
-      }),
-  }
-  const h = harness(port)
+  )
   const village = h.world.createRoom('village')
   const owner = h.join()
   const observer = h.join()
@@ -136,7 +127,7 @@ test('settles solo EXP once after lost acknowledgements, source disposal, transf
   h.m1.respawn(owner.connection, { ...h.body(owner), vitals: { ...h.body(owner).vitals, hp: 37, mp: 12 } })
   h.attack(owner)
   await h.advance(8)
-  expect(port.commitReward).toHaveBeenCalledTimes(3)
+  expect(port.commitReward).toHaveBeenCalledTimes(2)
   expect(port.commitReward.mock.calls.every(([intent]) => intent === port.commitReward.mock.calls[0][0])).toBe(true)
   expect(port.commitReward.mock.calls[0][0].groups).toMatchObject([
     { effectiveDamage: 20, eligibleCharacterIds: [owner.session.characterId] },
@@ -168,8 +159,10 @@ test('settles solo EXP once after lost acknowledgements, source disposal, transf
 
   gate.resolve()
   await setImmediate()
-  expect(h.snapshot(recovered, village).level).toBe(1)
-  await h.advance()
+  expect(h.snapshot(recovered, village).level).toBe(2)
+  expect(recovered.progression.mock.calls.filter(([update]) => update.reward)).toHaveLength(0)
+  await h.advance(2)
+  expect(port.commitReward).toHaveBeenCalledTimes(3)
   expect(h.snapshot(recovered, village)).toMatchObject({
     characterId: owner.session.characterId,
     connectionEpoch: recovered.session.connectionEpoch,
@@ -190,18 +183,20 @@ test('settles solo EXP once after lost acknowledgements, source disposal, transf
 
 test('orders AP with EXP, reuses same-request confirmation, and rejects conflicting and stale mutations', async () => {
   const secondReward = Promise.withResolvers()
-  const memory = createMemoryEncounterRewardPort()
-  const port = {
-    ...memory,
-    commitReward: vi
-      .fn()
-      .mockImplementationOnce(memory.commitReward)
-      .mockImplementation(async (intent) => {
-        await secondReward.promise
-        return memory.commitReward(intent)
-      }),
-  }
-  const h = harness(port)
+  let port
+  const h = harness(
+    (memory) =>
+      (port = {
+        ...memory,
+        commitReward: vi
+          .fn()
+          .mockImplementationOnce(memory.commitReward)
+          .mockImplementation(async (intent) => {
+            await secondReward.promise
+            return memory.commitReward(intent)
+          }),
+      })
+  )
   const owner = h.join()
   const observer = h.join()
   const initial = h.payload(owner, 1, { str: 1 })
@@ -373,14 +368,13 @@ test('validates equipment ownership, identity, level and slot and clamps live vi
 
 test('serializes insert, AP, EXP and equipment in one version order and preserves state across travel and reconnect', async () => {
   const gate = Promise.withResolvers()
-  const memory = createMemoryEncounterRewardPort()
-  const h = harness({
+  const h = harness((memory) => ({
     ...memory,
     async commitReward(intent) {
       await gate.promise
       return memory.commitReward(intent)
     },
-  })
+  }))
   const owner = h.join()
   const village = h.world.createRoom('village')
   const id = owner.session.characterId
@@ -463,15 +457,17 @@ test('serializes insert, AP, EXP and equipment in one version order and preserve
 
 test('drains an accepted solo reward after the last room and its owner have been removed', async () => {
   const gate = Promise.withResolvers()
-  const memory = createMemoryEncounterRewardPort()
-  const port = {
-    releaseReceipt: vi.fn(memory.releaseReceipt),
-    commitReward: vi.fn(async (intent) => {
-      await gate.promise
-      return memory.commitReward(intent)
-    }),
-  }
-  const h = harness(port)
+  let port
+  const h = harness(
+    (memory) =>
+      (port = {
+        releaseReceipt: vi.fn(memory.releaseReceipt),
+        commitReward: vi.fn(async (intent) => {
+          await gate.promise
+          return memory.commitReward(intent)
+        }),
+      })
+  )
   const owner = h.join()
   await h.advance()
   h.attack(owner)
@@ -490,15 +486,13 @@ test('drains an accepted solo reward after the last room and its owner have been
 
 test('applies a frozen solo grant if its recipient dies before confirmation without reviving them', async () => {
   const gate = Promise.withResolvers()
-  const memory = createMemoryEncounterRewardPort()
-  const port = {
+  const h = harness((memory) => ({
     ...memory,
     async commitReward(intent) {
       await gate.promise
       return memory.commitReward(intent)
     },
-  }
-  const h = harness(port)
+  }))
   const owner = h.join()
   await h.advance()
   h.attack(owner)
@@ -518,5 +512,209 @@ test('applies a frozen solo grant if its recipient dies before confirmation with
     action: { kind: 'death', diedAtTick },
     vitals: { hp: 0, maxHp: 60, mp: 11, maxMp: 35 },
   })
+  h.world.disposeRoom(h.m1)
+})
+
+test('recovers committed progression and drops through a reconnect snapshot when the owner was disconnected at commit', async () => {
+  const gate = Promise.withResolvers()
+  const h = harness((memory) => ({
+    ...memory,
+    async commitReward(intent) {
+      await gate.promise
+      return memory.commitReward(intent)
+    },
+  }))
+  const owner = h.join()
+  await h.advance()
+  h.attack(owner)
+  await h.advance(6)
+  h.world.leave(h.m1, owner.connection, true)
+  gate.resolve()
+  await setImmediate()
+  await h.advance()
+  expect(h.m1.snapshot().monsters[0].state).toBe('dead')
+  expect(owner.progression).not.toHaveBeenCalled()
+  expect(h.world.ownerGroundLoot(h.m1, owner.connection)).toBeUndefined()
+  const rebound = h.peer()
+  expect(h.world.reconnect(h.m1, rebound, owner.session.reconnectToken)).toBe(true)
+  expect(h.snapshot(rebound)).toMatchObject({ characterId: owner.session.characterId, characterVersion: 1, level: 2 })
+  expect(h.world.ownerGroundLoot(h.m1, rebound.connection).update.loot).toHaveLength(5)
+  expect(rebound.progression).not.toHaveBeenCalled()
+  h.world.disposeRoom(h.m1)
+})
+
+test('settles to a closed original identity without granting economy or drops to a new anonymous session', async () => {
+  const gate = Promise.withResolvers()
+  let repository
+  let receipt
+  const h = harness(
+    (memory) => ({
+      ...memory,
+      async commitReward(intent) {
+        await gate.promise
+        receipt = memory.commitReward(intent)
+        return receipt
+      },
+    }),
+    {
+      characterRepositoryFactory(...args) {
+        repository = createMemoryCharacterRepository(...args)
+        return repository
+      },
+    }
+  )
+  const owner = h.join()
+  await h.advance()
+  h.attack(owner)
+  await h.advance(6)
+  h.world.leave(h.m1, owner.connection)
+  const replacement = h.join()
+  expect(replacement.session.characterId).not.toBe(owner.session.characterId)
+  expect(h.world.checkpoint(h.m1, owner.connection)).toBeUndefined()
+  await h.advance()
+  expect(h.m1.player(owner.session.characterId)).toBeUndefined()
+  gate.resolve()
+  await setImmediate()
+  expect(repository.read(owner.session.characterId)).toMatchObject({ level: 2, version: 1 })
+  expect(receipt.grants.every(({ ownerCharacterId }) => ownerCharacterId === owner.session.characterId)).toBe(true)
+  await h.advance()
+  expect(repository.read(owner.session.characterId)).toBeUndefined()
+  expect(h.m1.player(owner.session.characterId)).toBeUndefined()
+  expect(h.snapshot(replacement)).toMatchObject({ level: 1, characterVersion: 0 })
+  expect(h.world.ownerGroundLoot(h.m1, replacement.connection).update.loot).toEqual([])
+  expect(replacement.progression).not.toHaveBeenCalled()
+  h.world.disposeRoom(h.m1)
+})
+
+test('rebinds a delayed reward after Village resurrection and disposal of its source instance', async () => {
+  const gate = Promise.withResolvers()
+  let receipt
+  const h = harness((memory) => ({
+    ...memory,
+    async commitReward(intent) {
+      await gate.promise
+      receipt = memory.commitReward(intent)
+      return receipt
+    },
+  }))
+  const village = h.world.createRoom('village')
+  const destination = h.world.createRoom('m1')
+  const owner = h.join()
+  await h.advance()
+  h.attack(owner)
+  await h.advance(6)
+  const body = h.body(owner)
+  h.m1.respawn(owner.connection, {
+    ...body,
+    action: { kind: 'death', diedAtTick: h.m1.snapshot().serverTick },
+    vitals: { ...body.vitals, hp: 0 },
+  })
+  await h.advance(91)
+  const recovered = h.peer()
+  expect(h.world.acceptTransfer(village, recovered, owner.offers[0].ticket, owner.session.reconnectToken)).toBe(true)
+  await h.advance()
+  expect(h.body(recovered, village).vitals.hp).toBe(50)
+  h.world.disposeRoom(h.m1)
+  expect(h.m1.snapshot().monsters).toEqual([])
+  expect(
+    h.world.requestPortal(village, recovered.connection, {
+      requestId: 1,
+      mapEpoch: 1,
+      objectId: 'p_to_m1',
+    })
+  ).toBe(true)
+  await h.advance()
+  const returned = h.peer()
+  expect(h.world.acceptTransfer(destination, returned, recovered.offers[0].ticket, recovered.session.reconnectToken)).toBe(true)
+  await h.advance()
+  const before = h.body(returned, destination)
+  expect(before.lifeStartedTick).not.toBe(body.lifeStartedTick)
+  gate.resolve()
+  await setImmediate()
+  await h.advance()
+  expect(h.body(returned, destination).vitals).toMatchObject({ hp: 50, maxHp: 60 })
+  expect(h.body(returned, destination).lifeStartedTick).toBe(before.lifeStartedTick)
+  expect(receipt.grants.every(({ placement }) => placement.sourceMapInstanceId === h.m1.mapInstanceId)).toBe(true)
+  const loot = h.world.ownerGroundLoot(destination, returned.connection).update.loot
+  expect(loot).toEqual(
+    receipt.grants.map(({ lootId, expiresAtUtcMilliseconds, content }) => ({
+      lootId,
+      expiresAtUtcMilliseconds,
+      content,
+      position: receipt.position,
+    }))
+  )
+  expect(returned.progression).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ level: 2, reward: expect.any(Object) }))
+  expect(recovered.progression).not.toHaveBeenCalled()
+  expect(owner.progression).not.toHaveBeenCalled()
+  expect(h.m1.snapshot().monsters).toEqual([])
+  h.world.disposeRoom(village)
+  h.world.disposeRoom(destination)
+})
+
+test('a failed reward notification still confirms the monster death and preserves the private snapshots', async () => {
+  const h = harness()
+  const owner = h.join()
+  const observer = h.join()
+  owner.progression.mockImplementation(() => {
+    throw Error('transport disconnected after commit')
+  })
+  await h.advance()
+  h.attack(owner)
+  await h.advance(8)
+  expect(owner.progression).toHaveBeenCalledOnce()
+  expect(h.snapshot(owner)).toMatchObject({ level: 2, characterVersion: 1 })
+  expect(h.world.ownerGroundLoot(h.m1, owner.connection).update.loot).toHaveLength(5)
+  expect(h.world.ownerGroundLoot(h.m1, observer.connection).update.loot).toEqual([])
+  expect(h.m1.snapshot().monsters[0].state).toBe('dead')
+  await h.advance(330)
+  expect(h.m1.snapshot().monsters[0]).toMatchObject({ generation: 2, state: 'patrol' })
+  expect(owner.progression).toHaveBeenCalledOnce()
+  h.world.disposeRoom(h.m1)
+})
+
+test('replays an unacknowledged receipt after its loot expires while the monster is still pending', async () => {
+  let utc = 1_000
+  let original
+  const acknowledgment = Promise.withResolvers()
+  const replayed = vi.fn()
+  const h = harness(
+    (memory) => ({
+      ...memory,
+      async commitReward(intent) {
+        const receipt = memory.commitReward(intent)
+        if (original) {
+          replayed(receipt)
+          return receipt
+        }
+        original = receipt
+        await acknowledgment.promise
+        throw Error('acknowledgment lost')
+      },
+    }),
+    { nowUtcMilliseconds: () => utc }
+  )
+  const owner = h.join()
+  await h.advance()
+  h.attack(owner)
+  await h.advance(8)
+  expect(original.grants).toHaveLength(5)
+  expect(h.m1.snapshot().monsters[0].state).toBe('rewardPending')
+  expect(owner.progression).not.toHaveBeenCalled()
+  const first = h.world.ownerGroundLoot(h.m1, owner.connection)
+  expect(first.update.loot).toHaveLength(5)
+  utc += 120_000
+  await h.advance()
+  const expired = h.world.ownerGroundLoot(h.m1, owner.connection, first.feed)
+  expect(expired.update).toMatchObject({ kind: 'delta', added: [], removed: original.grants.map(({ lootId }) => lootId) })
+  acknowledgment.resolve()
+  await setImmediate()
+  await h.advance(2)
+  expect(replayed).toHaveBeenCalledOnce()
+  expect(replayed.mock.lastCall[0]).toBe(original)
+  expect(h.world.ownerGroundLoot(h.m1, owner.connection, expired.feed)).toBeUndefined()
+  expect(h.snapshot(owner)).toMatchObject({ characterVersion: 1, level: 2 })
+  expect(owner.progression).toHaveBeenCalledOnce()
+  expect(h.m1.snapshot().monsters[0].state).toBe('dead')
   h.world.disposeRoom(h.m1)
 })

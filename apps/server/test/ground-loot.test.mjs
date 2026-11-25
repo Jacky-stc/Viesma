@@ -4,9 +4,9 @@ import { parseOwnerGroundLoot, parseOwnerLootCommandResult, PROTOCOL_VERSION } f
 import { placePlayerAtSpawn, playerFeet, ticksPerSecond } from '@viesma/simulation'
 import { expect, test, vi } from 'vitest'
 import { createMemoryCharacterRepository } from '../src/runtime/memory-character-repository.ts'
-import { createMemoryPersonalLootRepository } from '../src/runtime/memory-personal-loot.ts'
 import { createWorldCoordinator } from '../src/runtime/world-coordinator.ts'
 import { fixtureGroundGrant } from './ground-loot-fixture.mjs'
+import { createRewardFixture } from './reward-fixture.mjs'
 import { combatPeer } from './shared-combat-fixture.mjs'
 
 const data = loadGrayboxGameData()
@@ -171,7 +171,8 @@ test('publishes committed M5.2 rolls only to the owner and preserves the origina
   const beforeObserver = h.view(observer)
   const { characterId } = owner.session
   const secret = 'private-fixture-seed'
-  const rolls = createMemoryPersonalLootRepository({ nowUtcMilliseconds: () => 100, randomForEntry: () => () => secret.length % 1 })
+  const { reward, characters } = createRewardFixture(data, { nowUtcMilliseconds: () => 100, randomForEntry: () => () => secret.length % 1 })
+  characters.open(characterId)
   const intent = {
     claim: {
       deathId: 'frozen-death',
@@ -183,7 +184,7 @@ test('publishes committed M5.2 rolls only to the owner and preserves the origina
     groups: [{ groupKey: `solo:${characterId}`, effectiveDamage: 1, eligibleCharacterIds: [characterId], contributions: [] }],
     balanceVersion: data.balanceVersion,
   }
-  const { grants } = rolls.commitReward(intent, data)
+  const { grants } = reward.commitReward(intent)
   expect(grants).toHaveLength(5)
   h.world.deliverCommittedGroundLoot(h.room, grants)
   const { update, feed } = h.view(owner, h.room, beforeOwner.feed)

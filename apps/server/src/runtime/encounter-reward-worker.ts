@@ -1,7 +1,6 @@
-import type { DeathId, RewardReceipt } from '@viesma/domain'
-import type { EncounterRewardIntent, MonsterDeathIdentity } from '@viesma/simulation'
-
-type EncounterRewardReceipt = RewardReceipt & MonsterDeathIdentity
+import type { DeathId } from '@viesma/domain'
+import type { EncounterRewardIntent } from '@viesma/simulation'
+import type { EncounterRewardReceipt } from './memory-personal-loot.ts'
 
 export interface EncounterRewardPort {
   // 同一 deathId 的處理須重用已提交的 receipt，即使先前的確認遺失。
@@ -9,25 +8,9 @@ export interface EncounterRewardPort {
   releaseReceipt(deathId: DeathId): void
 }
 
-export function createMemoryEncounterRewardPort(): EncounterRewardPort {
-  const receipts = new Map<DeathId, EncounterRewardReceipt>()
-  return {
-    commitReward({ claim: { deathId, monsterId, generation, encounterId } }) {
-      const existing = receipts.get(deathId)
-      if (existing) return existing
-      const receipt = Object.freeze({ deathId, monsterId, generation, encounterId, resultingVersions: Object.freeze([]) })
-      receipts.set(deathId, receipt)
-      return receipt
-    },
-    releaseReceipt(deathId) {
-      receipts.delete(deathId)
-    },
-  }
-}
-
 interface RewardJob {
   readonly intent: EncounterRewardIntent
-  readonly commitProgression: (() => RewardReceipt['resultingVersions']) | undefined
+  readonly releaseRecipients: (() => void) | undefined
   retainedByEncounter: boolean
   state:
     { readonly kind: 'ready' } | { readonly kind: 'processing' } | { readonly kind: 'committed'; readonly receipt: EncounterRewardReceipt }
@@ -36,8 +19,9 @@ interface RewardJob {
 const pendingAdmissionLimit = 256
 
 export function createEncounterRewardWorker(
-  port: EncounterRewardPort = createMemoryEncounterRewardPort(),
-  prepareProgression?: (intent: EncounterRewardIntent) => () => RewardReceipt['resultingVersions']
+  port: EncounterRewardPort,
+  retainRecipients?: (intent: EncounterRewardIntent) => () => void,
+  applyCompletion?: (intent: EncounterRewardIntent, receipt: EncounterRewardReceipt) => void
 ) {
   const jobs = new Map<DeathId, RewardJob>()
   const completions = new Map<DeathId, EncounterRewardReceipt | undefined>()
@@ -54,7 +38,7 @@ export function createEncounterRewardWorker(
     accept(intent: EncounterRewardIntent): boolean {
       const { deathId } = intent.claim
       if (jobs.has(deathId)) return false
-      jobs.set(deathId, { intent, commitProgression: prepareProgression?.(intent), retainedByEncounter: true, state: { kind: 'ready' } })
+      jobs.set(deathId, { intent, releaseRecipients: retainRecipients?.(intent), retainedByEncounter: true, state: { kind: 'ready' } })
       pending++
       return true
     },
@@ -82,13 +66,14 @@ export function createEncounterRewardWorker(
           job.state = { kind: 'ready' }
           continue
         }
-        const resultingVersions = job.commitProgression?.()
-        job.state = {
-          kind: 'committed',
-          receipt: resultingVersions ? Object.freeze({ ...receipt, resultingVersions }) : receipt,
-        }
+        job.state = { kind: 'committed', receipt }
         pending--
-        if (!job.retainedByEncounter) release(deathId)
+        try {
+          applyCompletion?.(job.intent, receipt)
+        } finally {
+          job.releaseRecipients?.()
+          if (!job.retainedByEncounter && jobs.has(deathId)) release(deathId)
+        }
       }
       completions.clear()
 

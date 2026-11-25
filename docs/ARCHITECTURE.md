@@ -217,6 +217,7 @@ Input seq 在 connection epoch 內單調遞增。Server 拒絕舊 epoch、已見
 - **M5.1（protocol 5）**。`OwnerProgression` 綁定 `characterId`、`connectionEpoch` 與 `mapEpoch`，在入房／重連及角色版本變更時傳送全量進度，可附 AP 請求的結案碼。較舊版本的快照不得覆寫已確認資料。
 - **M5.3（protocol 6）**。`OwnerInventory` 沿用同一綁定與 characterVersion，傳送本人全量 bag、equipment、currency，可附裝備操作結案。裝備指令包含來源物品身分與預期版本。AP 與裝備重送以原請求 epoch 和 requestId 識別，傳送時須附目前連線和地圖 epoch。
 - **M5.4（protocol 7）**。`OwnerGroundLoot` 與 `OwnerLootCommandResult` 僅經目前角色綁定的 socket 傳送，另帶 delivery instance ID。匿名 play session 由伺服器的角色路由和目前房間座席辨識。每個 owner／instance 的 `privateRevision` 單調增加，delta 附 `baseRevision`；客戶端以完整 snapshot 起始，跳號時要求全量，遞送交錯時以已接受的 revision 為準。Pickup／consume 共用 AP／裝備的收據範圍。
+- **M5.5**。`OwnerProgression` 可附一次性的 `reward` 摘要，帶 process 內遞增序號、實際入帳 EXP、升級數和地面掉落筆數。客戶端先比對目前的角色及 epoch，再依序號去重。重連以全量快照恢復，快照不重播摘要。地面內容仍由 `OwnerGroundLoot` 傳送。
 - **Party-only messages**：PartyService 對所有 connected members 發送 revisioned full snapshot，包含同／跨 map 的 member 摘要。不同 party 收不到 invite／roster 私有資料。
 
 Personal loot／inventory **不放 public room Schema**；預設用 server 指定 client 的 reliable messages，靠完整 private snapshot 修復斷線，而不是只在畫面過濾。將來若用 StateView 也須有 payload isolation tests；不是目前必需依賴。
@@ -272,11 +273,11 @@ M4.3 將 first-hit lock、角色累計傷害、最近傷害 tick 與已使用的
 
 M4.4 同一固定 tick 驗證 receipt 的 deathId、monsterId、generation 與 encounterId。確認 tick C 進入 Dead，C + 30 進入 RespawnWait，C + 330 於原 spawn 以新 monsterId、遞增 generation 與新 encounterId 進入 Spawning，下一 tick 進入 Patrol。前一世代接受的 swing 不會命中新世代。房間銷毀只釋放對 receipt 的保留，原工作仍由 world worker 完成。
 
-每個 WorldCoordinator 使用一個跨房間的 CharacterCoordinator 管理匿名角色的記憶體進度、背包、裝備、purse 與收據。WorldCoordinator 驗證 socket／map 綁定與即時角色互動狀態。固定 tick 依序接受 reward completion、處理交接、執行玩家 mutation、步進戰鬥。Reward worker 保留凍結的單人授予目標至 EXP 收據提交。記憶體比較版本後，在同一同步執行回合提交角色狀態與收據。回覆重送時保留原結案及其版本，快照取當前角色版本。跨 epoch 的請求只可查回已存在的收據。完整的 EXP 與 ground grants 交易及故障驗證屬 M5.5。
+每個 WorldCoordinator 使用一個跨房間的 CharacterCoordinator 管理匿名角色的記憶體進度、背包、裝備、purse 與收據。WorldCoordinator 驗證 socket／map 綁定與即時角色互動狀態。固定 tick 依序接受 reward completion、處理交接、執行玩家 mutation、步進戰鬥。Reward worker 保留凍結的單人授予目標到 completion。記憶體比較版本後，在同一同步執行回合提交角色狀態與收據。回覆重送時保留原結案及其版本，快照取當前角色版本。跨 epoch 的請求只可查回已存在的收據。M5.5 的原子提交見下節。
 
 M5.2 的 server-only 記憶體 adapter 接受凍結的 `EncounterRewardIntent`，以死亡地圖與 spawn ID 從同版本的已驗證資料取得怪物階級及掉落表。每個 owner／entry 的 roll 以 server secret、deathId、ownerCharacterId、tableEntryId 和 stream counter 派生。Pending grant 保留物品定義 ID／數量或貨幣金額、balanceVersion、來源地圖／instance 與死亡座標。Death settlement 成功寫入記憶體時，以 UTC wall clock 設定原始到期時間，按 deathId 取得原 receipt。Grant ID 以 deathId、ownerCharacterId 和 tableEntryId 編碼。M5.4 負責最終安全座標、delivery instance、可見性及拾取。M5.5 將此結算契約接入現行 reward worker，並把到期時間錨定在 EXP 與 ground grants 的同一次原子提交。
 
-後續完整獎勵依下列契約交付。
+M6.4 的組隊政策與 M7 的持久結算依下列契約交付。
 
 1. Combat applyHit 檢查 monster lifecycle／attackId，寫入 EffectiveDamage 與 first-hit group lock。
 2. 首個 HP≤0 transition 設 `RewardPending`，以 `(mapInstanceId, spawnId, monsterId, encounterId)` 編碼唯一的 `deathId`（mapInstanceId 已含 nodeBootId，monsterId 識別 generation），凍結 death-time eligibility／group damage／balanceVersion。
@@ -305,7 +306,9 @@ M5.4 在 world tick 的路由交接與角色命令階段處理消耗品。Admiss
 
 地面紀錄使用 M5.2 原始來源與 payload，expiry 由成功 reward commit 的 UTC 時間加 120 秒。記憶體中的 delivery instance 平時跟隨原始房間。當原房間已釋放，角色成功轉入相同地圖時可將未過期紀錄綁到新的 instance，保留落點與 expiry。程序重啟後的重建與 rebind 屬 M7。
 
-M5.5 在同一記憶體 reward transaction 內，以 frozen death intent 抽取一次，從成功提交的 UTC 時間計算 expiresAt，將 committed grants 傳給 `ground.prepareDelivery(grants, claim.mapId, claim.mapInstanceId, committedAtUtcMilliseconds)`。取得的發布函式與 EXP／level／AP 和 reward receipt 共用同一提交回合。來源 instance 已釋放且 owner 已在相同地圖時，可在發布後以 `ground.rebind` 更新 delivery instance。交易全數成功後才由目前 owner 綁定送出私人投影，並使怪物離開 `RewardPending`。M5.4 的 fixture 以伺服器內部的 `deliverCommittedGroundLoot` 驗證既有 M5.2 收據。
+M5.5 保留接受死亡當下的角色 identity 與資格，預備單人 EXP、個人 roll 與安全地板落點。CharacterCoordinator 按角色 ID 從最新 aggregate 準備進度，與 AP、裝備、拾取及藥水扣量共用同步的記憶體 mutation 邊界。全部驗證後，EXP／level／AP、角色版本、備妥的地面索引與 death receipt 在同一回合發布。所有 grants 使用同一次成功提交的 UTC 時間加 120 秒。相同意圖重用原 receipt，衝突的 deathId 拒絕。
+
+固定 tick 接受與 deathId／monsterId／generation／encounterId 相符的 receipt，從最新角色版本重算數值且只 clamp HP／MP，對來源 instance 已消失的同圖 owner 執行 rebind，再透過目前綁定的 `OwnerProgression` 發送一次性的 EXP、升級及掉落筆數。既有私人掉落 snapshot／delta 依 `privateRevision` 提供內容，重連依當前 aggregate 與地面快照恢復。通知失敗仍可確認怪物死亡。角色 session 關閉後，已接受的工作持有原角色到結算完成，之後依原記憶體角色釋放契約處理。
 
 ### 8.1 初始 logical schema
 

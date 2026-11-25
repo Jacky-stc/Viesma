@@ -1,28 +1,42 @@
 import {
   isNonNegativeSafeInteger,
+  type CharacterId,
   type DeathId,
   type GroundLootGrant,
+  type MapId,
   type NonNegativeSafeInteger,
   type RewardReceipt,
+  type WorldPoint,
 } from '@viesma/domain'
 import { initialEncounterRewardBalance, type GameData } from '@viesma/game-data'
-import type { EncounterRewardIntent } from '@viesma/simulation'
+import { allocateSoloExperience, type EncounterRewardIntent, type MonsterDeathIdentity } from '@viesma/simulation'
 import { isDeepStrictEqual } from 'node:util'
+import type { createCharacterCoordinator } from './character-coordinator.ts'
+import type { GroundLootStore } from './ground-loot.ts'
 import { createServerLootRng } from './loot-rng.ts'
-import { rollSoloPersonalLoot, type LootRollRng, type PendingGroundLootGrant } from './personal-loot.ts'
+import { rollSoloPersonalLoot, soloRewardRecipients, type LootRollRng, type PendingGroundLootGrant } from './personal-loot.ts'
 
 type CommittedGroundLootGrant = Extract<GroundLootGrant, { readonly state: 'committed' }>
+type Progression = ReturnType<ReturnType<typeof createCharacterCoordinator>['prepareReward']>
 
-interface PersonalLootReceipt extends Pick<RewardReceipt, 'deathId'> {
+export interface EncounterRewardReceipt extends RewardReceipt, MonsterDeathIdentity {
+  readonly balanceVersion: string
   readonly committedAtUtcMilliseconds: NonNegativeSafeInteger
   readonly grants: readonly CommittedGroundLootGrant[]
+  readonly position: WorldPoint | undefined
+  readonly recipients: Progression['recipients']
 }
 
 interface Settlement {
   readonly intent: EncounterRewardIntent
   state:
-    | { readonly kind: 'pending'; readonly grants: readonly PendingGroundLootGrant[] }
-    | { readonly kind: 'committed'; readonly receipt: PersonalLootReceipt }
+    | {
+        readonly kind: 'pending'
+        readonly grants: readonly PendingGroundLootGrant[]
+        position?: WorldPoint
+        readonly experience: readonly { readonly characterId: CharacterId; readonly exp: number }[]
+      }
+    | { readonly kind: 'committed'; readonly receipt: EncounterRewardReceipt }
 }
 
 class RewardIdentityConflict extends Error {
@@ -50,33 +64,57 @@ function orderedIntent(intent: EncounterRewardIntent): EncounterRewardIntent {
   }
 }
 
-export function createMemoryPersonalLootRepository({
-  randomForEntry = createServerLootRng(),
-  nowUtcMilliseconds = Date.now,
-}: { readonly randomForEntry?: LootRollRng; readonly nowUtcMilliseconds?: () => number } = {}) {
+export function createMemoryPersonalLootRepository(
+  data: GameData,
+  characters: Pick<ReturnType<typeof createCharacterCoordinator>, 'prepareReward'>,
+  ground: GroundLootStore,
+  baseExperience: (mapId: MapId, spawnId: EncounterRewardIntent['claim']['spawnId']) => number,
+  {
+    randomForEntry = createServerLootRng(),
+    nowUtcMilliseconds = Date.now,
+    onStage,
+  }: {
+    readonly randomForEntry?: LootRollRng
+    readonly nowUtcMilliseconds?: () => number
+    readonly onStage?: (stage: 'progression' | 'ground' | 'receipt') => void
+  } = {}
+) {
   const settlements = new Map<DeathId, Settlement>()
 
   return {
-    findCommittedReward(deathId: DeathId): PersonalLootReceipt | undefined {
+    findCommittedReward(deathId: DeathId): EncounterRewardReceipt | undefined {
       const state = settlements.get(deathId)?.state
       return state?.kind === 'committed' ? state.receipt : undefined
     },
-    commitReward(intent: EncounterRewardIntent, data: GameData): PersonalLootReceipt {
-      const { deathId } = intent.claim
+    releaseReceipt(deathId: DeathId): void {
+      settlements.delete(deathId)
+    },
+    commitReward(intent: EncounterRewardIntent): EncounterRewardReceipt {
+      const { deathId, mapId, mapInstanceId, spawnId, position: deathPosition, monsterId, generation, encounterId } = intent.claim
       const source = orderedIntent(intent)
       let settlement = settlements.get(deathId)
       if (settlement) {
         if (!isDeepStrictEqual(settlement.intent, source)) throw new RewardIdentityConflict()
       } else {
+        const grants = rollSoloPersonalLoot(source, data, randomForEntry)
+        const allocated = new Map(
+          allocateSoloExperience(baseExperience(mapId, spawnId), source.groups).map((grant) => [grant.characterId, grant.exp])
+        )
+        const experience = soloRewardRecipients(source.groups).map((characterId) => ({
+          characterId,
+          exp: allocated.get(characterId) ?? 0,
+        }))
         settlement = {
           intent: structuredClone(source),
-          state: { kind: 'pending', grants: rollSoloPersonalLoot(source, data, randomForEntry) },
+          state: { kind: 'pending', grants, experience },
         }
         settlements.set(deathId, settlement)
       }
       if (settlement.state.kind === 'committed') return settlement.state.receipt
 
-      // 只有同步提交成功的 receipt 可被讀取。時計失敗時保留已凍結的 roll。
+      // 每次重試都從最新角色狀態準備。已凍結的 roll 和落點繼續沿用。
+      if (settlement.state.grants.length) settlement.state.position ??= ground.place(mapId, deathPosition)
+      const { experience, position } = settlement.state
       const committedAtUtcMilliseconds = nowUtcMilliseconds()
       const expiresAtUtcMilliseconds = committedAtUtcMilliseconds + initialEncounterRewardBalance.groundLootLifetimeMilliseconds
       if (!isNonNegativeSafeInteger(committedAtUtcMilliseconds) || !isNonNegativeSafeInteger(expiresAtUtcMilliseconds)) {
@@ -85,8 +123,30 @@ export function createMemoryPersonalLootRepository({
       const grants = settlement.state.grants.map((grant): CommittedGroundLootGrant =>
         Object.freeze({ ...grant, state: 'committed', expiresAtUtcMilliseconds })
       )
-      const receipt = Object.freeze({ deathId, committedAtUtcMilliseconds, grants: Object.freeze(grants) })
-      settlement.state = { kind: 'committed', receipt }
+      const progression = characters.prepareReward(experience)
+      onStage?.('progression')
+      const delivery = position ? ground.prepareDelivery(grants, mapId, mapInstanceId, committedAtUtcMilliseconds, position) : undefined
+      onStage?.('ground')
+      const receipt = Object.freeze({
+        deathId,
+        monsterId,
+        generation,
+        encounterId,
+        balanceVersion: source.balanceVersion,
+        committedAtUtcMilliseconds,
+        grants: Object.freeze(grants),
+        position,
+        recipients: progression.recipients,
+        resultingVersions: progression.resultingVersions,
+      })
+      const committed = { kind: 'committed' as const, receipt }
+      onStage?.('receipt')
+      progression.validate()
+      delivery?.validate()
+      // 首筆寫入之後只更新已備妥的記憶體索引及參照。
+      delivery?.publish()
+      progression.publish()
+      settlement.state = committed
       return receipt
     },
   }

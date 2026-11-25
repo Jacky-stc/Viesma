@@ -71,6 +71,7 @@ export type MultiplayerPresentation = Pick<PublicPlayer, 'hp' | 'maxHp' | 'state
   readonly players: number
   readonly mapName: string
   readonly progression: OwnerProgression | undefined
+  readonly reward: OwnerProgression['reward']
   readonly inventory: OwnerInventory | undefined
   readonly items: readonly ItemDefinition[]
   readonly equipmentStatus: 'PENDING' | EquipmentResultCode | undefined
@@ -97,6 +98,7 @@ interface RoomScene {
   readonly groundLoot: ReturnType<typeof createOwnerLootView>
   binding?: MapRoomSession
   progression?: OwnerProgression
+  reward?: NonNullable<OwnerProgression['reward']>
   inventory?: OwnerInventory
   apStatus?: 'PENDING' | ApResultCode
   equipmentStatus?: 'PENDING' | EquipmentResultCode
@@ -577,6 +579,7 @@ export async function runMultiplayer(
         latestCharacterVersion = update.characterVersion
         scene.progression = update
       }
+      if (update.reward && update.reward.sequence > (scene.reward?.sequence ?? 0)) scene.reward = update.reward
       const { result } = update
       if (result && pendingAp && result.requestId === pendingAp.requestId && result.requestEpoch === pendingAp.requestEpoch) {
         pendingAp = undefined
@@ -906,6 +909,7 @@ export async function runMultiplayer(
       state !== previous.state ||
       facing !== previous.facing ||
       scene.progression !== previous.progression ||
+      scene.reward !== previous.reward ||
       apStatus !== previous.apStatus ||
       scene.inventory !== previous.inventory ||
       equipmentStatus !== previous.equipmentStatus ||
@@ -922,6 +926,7 @@ export async function runMultiplayer(
         mapName,
         spawnProtected,
         progression: scene.progression,
+        reward: scene.reward,
         apStatus,
         allocateAp,
         inventory: scene.inventory,

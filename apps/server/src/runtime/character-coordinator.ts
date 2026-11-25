@@ -6,7 +6,6 @@ import {
   type CharacterCommandCode,
   type CharacterEconomy,
   type CharacterId,
-  type DeathId,
   type DerivedCombatStats,
   type EquipmentOperation,
   type Inventory,
@@ -190,6 +189,50 @@ export function createCharacterCoordinator(
       return state
     },
     release,
+    retainReward(recipients: readonly CharacterId[]) {
+      for (const id of recipients) {
+        if (!repository.read(id)) throw new Error('Missing frozen reward recipient')
+      }
+      for (const id of recipients) retain(id)
+      return () => {
+        for (const id of recipients) release(id)
+      }
+    },
+    prepareReward(recipients: readonly { readonly characterId: CharacterId; readonly exp: number }[]) {
+      const changes: { current: CharacterEconomy; next: CharacterEconomy }[] = []
+      const summaries = recipients.map(({ characterId, exp }) => {
+        const current = repository.read(characterId)
+        if (!current) throw new Error('Missing retained reward recipient')
+        const progression = grantExperience(current, exp, data.progression)
+        const next = progression === current ? current : { ...progression, inventory: current.inventory }
+        changes.push({ current, next })
+        let experience = 0
+        if (next !== current) {
+          stats(next)
+          experience = progression.expWithinLevel - current.expWithinLevel
+          for (let level = current.level; level < progression.level; level++) {
+            const threshold = data.progression.expToNextLevel[level - 1]
+            if (threshold === undefined) throw new Error('Missing reward level threshold')
+            experience += threshold
+          }
+        }
+        return Object.freeze({
+          characterId,
+          version: progression.version,
+          experience,
+          levelsGained: progression.level - current.level,
+        })
+      })
+      return {
+        recipients: Object.freeze(summaries),
+        resultingVersions: Object.freeze(
+          changes.flatMap(({ current, next: { characterId, version } }) =>
+            current.version === version ? [] : [Object.freeze({ characterId, version })]
+          )
+        ),
+        ...repository.prepareRewardProgression(changes),
+      }
+    },
     read: repository.read,
     stats,
     replay,
@@ -279,29 +322,6 @@ export function createCharacterCoordinator(
       return 'code' in result
         ? commit(current, key, fingerprint, result.code)
         : commit(current, key, fingerprint, 'CONFIRMED', withInventory(current, result.inventory))
-    },
-    retainExperience(characterId: CharacterId, deathId: DeathId, exp: number) {
-      if (!repository.read(characterId)) return undefined
-      retain(characterId)
-      const key = JSON.stringify(['exp', deathId])
-      const fingerprint = JSON.stringify(exp)
-      let settled: { readonly characterId: CharacterId; readonly version: CharacterEconomy['version'] } | null | undefined
-      return () => {
-        if (settled !== undefined) return settled ?? undefined
-        const current = repository.read(characterId)
-        if (!current) throw new Error('Missing retained EXP recipient')
-        let receipt = repository.findReceipt(characterId, key)
-        if (!receipt) {
-          const progression = grantExperience(current, exp, data.progression)
-          const next = progression === current ? current : { ...progression, inventory: current.inventory }
-          if (commit(current, key, fingerprint, 'CONFIRMED', next) !== 'CONFIRMED') throw new Error('Experience grant commit failed')
-          receipt = repository.findReceipt(characterId, key)
-        }
-        if (!receipt || receipt.fingerprint !== fingerprint) throw new Error('Conflicting experience grant')
-        settled = receipt.changed ? Object.freeze({ characterId, version: receipt.version }) : null
-        release(characterId)
-        return settled ?? undefined
-      }
     },
   }
 }

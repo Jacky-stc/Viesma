@@ -5,7 +5,6 @@ import { performance } from 'node:perf_hooks'
 import process from 'node:process'
 import { clearInterval, setInterval } from 'node:timers'
 import { setTimeout } from 'node:timers/promises'
-import { createMemoryEncounterRewardPort } from '../dist/runtime/encounter-reward-worker.js'
 import { createWorldCoordinator } from '../dist/runtime/world-coordinator.js'
 import { createSharedCombatLoop } from './shared-combat-loop.mjs'
 
@@ -26,7 +25,7 @@ const failed = Promise.withResolvers()
 const start = performance.now()
 console.info('[M4.5] Starting the 600-second wall-clock shared combat loop')
 try {
-  loop = createSharedCombatLoop(createWorldCoordinator, createMemoryEncounterRewardPort(), {
+  loop = createSharedCombatLoop(createWorldCoordinator, {
     clock: { nowMilliseconds: () => performance.now() },
     onBacklog: () => backlogEpisodes++,
     onBacklogRecovered: () => backlogRecoveries++,

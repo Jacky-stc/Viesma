@@ -37,6 +37,15 @@ function rollContent(
   }
 }
 
+export function soloRewardRecipients(groups: EncounterRewardIntent['groups']): readonly CharacterId[] {
+  const owners = new Set<CharacterId>()
+  for (const group of groups) {
+    const characterId = getSoloEligibleCharacterId(group)
+    if (characterId) owners.add(characterId)
+  }
+  return [...owners].sort()
+}
+
 export function rollSoloPersonalLoot(
   { claim, groups, balanceVersion }: EncounterRewardIntent,
   data: GameData,
@@ -44,12 +53,8 @@ export function rollSoloPersonalLoot(
 ): readonly PendingGroundLootGrant[] {
   if (data.balanceVersion !== balanceVersion) throw new RangeError('Loot data does not match the death balance version')
 
-  const owners = new Set<CharacterId>()
-  for (const group of groups) {
-    const characterId = getSoloEligibleCharacterId(group)
-    if (characterId) owners.add(characterId)
-  }
-  if (owners.size === 0) return Object.freeze([])
+  const owners = soloRewardRecipients(groups)
+  if (owners.length === 0) return Object.freeze([])
 
   const { deathId, mapId, mapInstanceId, spawnId, position } = claim
   const map = data.tiledMaps.find(({ id }) => id === mapId)
@@ -69,7 +74,7 @@ export function rollSoloPersonalLoot(
   })
   const grants: PendingGroundLootGrant[] = []
   const entries = [...table.entries].sort((left, right) => (left.id < right.id ? -1 : Number(left.id > right.id)))
-  for (const ownerCharacterId of [...owners].sort()) {
+  for (const ownerCharacterId of owners) {
     for (const entry of entries) {
       if (entry.chanceBps === 0) continue
       const nextInt = randomForEntry(deathId, ownerCharacterId, entry.id)

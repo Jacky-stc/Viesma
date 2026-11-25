@@ -1,6 +1,6 @@
 # 開發路線圖
 
-規格基線為 Task 0（2026-11-23）。正式任務由 45 項增為 46 項，新增 M5.6。目前 `DONE` 27 項（27／46，58.70%）、`NOT_STARTED` 18 項、`LOCAL_VERIFIED` 1 項，`IN_PROGRESS`／`BLOCKED` 各 0 項。進度以 `DONE` 除以正式任務總數計算，排除本次文件整理與五項風險檢查。 [協作規則](../AGENTS.md) · [驗證證據索引](evidence/README.md)
+規格基線為 Task 0（2026-11-23）。正式任務由 45 項增為 46 項，新增 M5.6。目前 `DONE` 28 項（28／46，60.87%）、`NOT_STARTED` 17 項、`LOCAL_VERIFIED` 1 項、`IN_PROGRESS`／`BLOCKED` 各 0 項。進度以 `DONE` 除以正式任務總數計算，排除本次文件整理與五項風險檢查。 [協作規則](../AGENTS.md) · [驗證證據索引](evidence/README.md)
 
 ## 1. 交付策略與 dependency graph
 
@@ -434,7 +434,7 @@ M5.1（`DONE`）→ 路線圖整理 → 啟動第一輪行動實機 smoke，與 
 - **Deliverables**：personal loot renderer、pickup／consume commands、privateRevision recovery 與 UI feedback。
 - **Acceptance criteria**：非 owner 收不到 loot payload；滿包保留 drop、expiry 不延長；dead／full HP／cooldown 新使用拒絕。
 - **Required tests**：duplicate／foreign／too-far pickup、expiry race、Bat floor fallback、inventory full、currency overflow、consume request retry／death-before-commit effect、private payload inspection。
-- **Status**：LOCAL_VERIFIED · [Evidence](evidence/M5.md#m54)
+- **Status**：DONE · [Evidence](evidence/M5.md#m54)
 
 ### M5.5 — Memory reward pipeline 與 solo loop gate
 
@@ -445,7 +445,7 @@ M5.1（`DONE`）→ 路線圖整理 → 啟動第一輪行動實機 smoke，與 
 - **Deliverables**：reward application service、solo gameplay walkthrough、fault fixtures。
 - **Acceptance criteria**：同 death 不重複 EXP／loot；失敗無成功通知，retry 用原結果；combat 不 await repository I/O。
 - **Required tests**：failure before／after commit、lost acknowledgement、rollback、reward／AP／equip 序列、死亡後 reward 不復活、完整 solo loop replay。
-- **Status**：NOT_STARTED
+- **Status**：LOCAL_VERIFIED · [Evidence](evidence/M5.md#m55)
 
 ### M5.6 — Village NPC 藥水商店
 

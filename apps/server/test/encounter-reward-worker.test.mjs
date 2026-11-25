@@ -1,5 +1,16 @@
 import { expect, test, vi } from 'vitest'
-import { createEncounterRewardWorker, createMemoryEncounterRewardPort } from '../src/runtime/encounter-reward-worker.ts'
+import { createEncounterRewardWorker } from '../src/runtime/encounter-reward-worker.ts'
+
+function createMemoryEncounterRewardPort() {
+  const receipts = new Map()
+  return {
+    commitReward({ claim }) {
+      if (!receipts.has(claim.deathId)) receipts.set(claim.deathId, Object.freeze({ ...claim, resultingVersions: [] }))
+      return receipts.get(claim.deathId)
+    },
+    releaseReceipt: (deathId) => receipts.delete(deathId),
+  }
+}
 
 async function flushProcessing() {
   for (let index = 0; index < 5; index++) await Promise.resolve()
@@ -70,7 +81,7 @@ test('keeps one immutable job across pre-commit failure, lost acknowledgement an
   expect(port.commitReward).toHaveBeenCalledTimes(3)
 })
 
-test.each([{ deathId: 'other' }, { generation: 1 }, { encounterId: 'old' }])(
+test.each([{ deathId: 'other' }, { monsterId: 'other' }, { generation: 1 }, { encounterId: 'old' }])(
   'retains detached work through a mismatched receipt %j and frees completed receipt state',
   async (mismatch) => {
     const memory = createMemoryEncounterRewardPort()

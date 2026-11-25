@@ -72,6 +72,35 @@ export function createMemoryCharacterRepository(
   }
 
   return {
+    prepareRewardProgression(candidates: readonly { readonly current: CharacterEconomy; readonly next: CharacterEconomy }[]) {
+      const changes = candidates.map(({ current, next }) => {
+        const entry = entries.get(current.characterId)
+        if (
+          !entry ||
+          entry.state !== current ||
+          next.characterId !== current.characterId ||
+          next.inventory !== current.inventory ||
+          !isNonNegativeSafeInteger(next.version) ||
+          next.version !== current.version + Number(next !== current) ||
+          !isNonNegativeSafeInteger(next.unspentAp) ||
+          !isNonNegativeSafeInteger(next.expWithinLevel)
+        )
+          throw new Error('Invalid staged reward progression')
+        return { entry, current, next: next === current ? current : freezeEconomy(next) }
+      })
+      return {
+        validate() {
+          for (const { entry, current } of changes) {
+            if (entries.get(current.characterId) !== entry || entry.state !== current) throw new Error('Stale staged reward progression')
+          }
+        },
+        publish() {
+          for (const { entry, current, next } of changes) {
+            if (current !== next) entry.state = next
+          }
+        },
+      }
+    },
     initialize(characterId: CharacterId, create: () => CharacterEconomy): CharacterEconomy {
       const existing = entries.get(characterId)
       if (existing) return existing.state
@@ -137,6 +166,10 @@ export function createMemoryCharacterRepository(
       return { kind: 'committed', receipt: committed }
     },
   } satisfies InventoryRepository & {
+    prepareRewardProgression(candidates: readonly { readonly current: CharacterEconomy; readonly next: CharacterEconomy }[]): {
+      validate(): void
+      publish(): void
+    }
     initialize(characterId: CharacterId, create: () => CharacterEconomy): CharacterEconomy
     read(characterId: CharacterId): CharacterEconomy | undefined
     remove(characterId: CharacterId): void

@@ -21,7 +21,6 @@ import { performance } from 'node:perf_hooks'
 import { clearInterval, setInterval } from 'node:timers'
 import { URL } from 'node:url'
 import { createDestinationRoom, createMapRoomClass } from '../dist/adapters/map-room.js'
-import { createMemoryEncounterRewardPort } from '../dist/runtime/encounter-reward-worker.js'
 import { createWorldCoordinator } from '../dist/runtime/world-coordinator.js'
 import { fixtureGroundGrant } from './ground-loot-fixture.mjs'
 import { movementSmokeData } from './movement-smoke-fixture.mjs'
@@ -73,29 +72,31 @@ export async function startBrowserFixtureServer({
   progressionScenario = false,
   inventoryScenario = false,
   groundLootScenario = false,
+  soloLoopScenario = false,
   traceMovement = false,
   observeReward,
   beforeReward,
 } = {}) {
   const original = loadGrayboxGameData()
-  const data = progressionScenario
-    ? progressionTestData()
-    : inventoryScenario
-      ? {
-          ...original,
-          tiledMaps: original.tiledMaps.map((map) => {
-            if (map.id !== 'm1') return map
-            const portal = map.portals.find(({ id }) => id === 'p_to_village')
-            if (!portal) throw new Error('Inventory fixture needs the M1 portal')
-            return {
-              ...map,
-              spawns: map.spawns.map((spawn) =>
-                spawn.id === 'spawn_from_village' ? { ...spawn, position: { ...spawn.position, x: portal.bounds.origin.x + 16 } } : spawn
-              ),
-            }
-          }),
-        }
-      : original
+  const data =
+    progressionScenario || soloLoopScenario
+      ? progressionTestData()
+      : inventoryScenario
+        ? {
+            ...original,
+            tiledMaps: original.tiledMaps.map((map) => {
+              if (map.id !== 'm1') return map
+              const portal = map.portals.find(({ id }) => id === 'p_to_village')
+              if (!portal) throw new Error('Inventory fixture needs the M1 portal')
+              return {
+                ...map,
+                spawns: map.spawns.map((spawn) =>
+                  spawn.id === 'spawn_from_village' ? { ...spawn, position: { ...spawn.position, x: portal.bounds.origin.x + 16 } } : spawn
+                ),
+              }
+            }),
+          }
+        : original
   const version = joinVersion(original)
   const tiledMaps = combatScenario
     ? data.tiledMaps.map((map) =>
@@ -121,16 +122,24 @@ export async function startBrowserFixtureServer({
   let movementTrace
   let lootUtc = 1_795_000_000_000
   const stagedBodies = new Map()
-  const memory = createMemoryEncounterRewardPort()
   const clock = { nowMilliseconds: () => stagedNow ?? performance.now() + clockOffset }
-  const world = createWorldCoordinator({ ...data, tiledMaps }, version.mapContentHash, {
+  const monsters = soloLoopScenario
+    ? data.monsters.map((monster) => (monster.id === 'slime' ? { ...monster, baseAttack: 42, attackReach: 36 } : monster))
+    : data.monsters
+  const world = createWorldCoordinator({ ...data, tiledMaps, monsters }, version.mapContentHash, {
     clock,
     nextId: randomUUID,
-    ...(groundLootScenario && { nowUtcMilliseconds: () => lootUtc }),
+    ...((groundLootScenario || soloLoopScenario) && { nowUtcMilliseconds: () => lootUtc }),
+    ...(soloLoopScenario && {
+      rewardRandom: (_deathId, _owner, entry) => (bound) => {
+        if (entry === 'equipment') return bound === 10_000 ? 0 : 2
+        return entry === 'currency' || entry === 'hp_potion' ? 0 : bound - 1
+      },
+    }),
     createDestination: createDestinationRoom,
     ...(traceMovement && { watchMovement: (id) => (movementTrace?.characterId === id ? movementTrace.capture : undefined) }),
     ...((observeReward || beforeReward) && {
-      rewardPort: {
+      wrapRewardPort: (memory) => ({
         ...memory,
         async commitReward(intent) {
           if (beforeReward) await beforeReward()
@@ -138,7 +147,7 @@ export async function startBrowserFixtureServer({
           observeReward?.(intent, receipt)
           return receipt
         },
-      },
+      }),
     }),
     onBacklog() {},
     schedule(wake, milliseconds) {
@@ -211,7 +220,8 @@ export async function startBrowserFixtureServer({
     },
     createRoom(mapId, roomId) {
       const runtime = world.createRoom(mapId, roomId)
-      if (progressionScenario || inventoryScenario || groundLootScenario || traceMovement) tracedRooms.set(roomId, runtime)
+      if (progressionScenario || inventoryScenario || groundLootScenario || soloLoopScenario || traceMovement)
+        tracedRooms.set(roomId, runtime)
       if (traceMovement) {
         const freeze = runtime.freeze
         const prepareArrival = runtime.prepareArrival
@@ -281,7 +291,8 @@ export async function startBrowserFixtureServer({
     const connection = matchMaker.getLocalRoomById(roomId)?.clients.getById(sessionId)
     const instance = tracedRooms.get(roomId)
     const binding = connection && instance?.binding(connection)
-    if (!groundLootScenario || !binding || !instance.player(binding.characterId)) throw new Error('Missing ground loot fixture player')
+    if ((!groundLootScenario && !soloLoopScenario) || !binding || !instance.player(binding.characterId))
+      throw new Error('Missing ground loot fixture player')
     return { instance, connection, binding }
   }
   return {
@@ -319,6 +330,7 @@ export async function startBrowserFixtureServer({
       return world.queueInventoryGrant(characterId, grantId, grant)
     },
     deliverGroundLoot(seat, content, label) {
+      if (!groundLootScenario) throw new Error('Missing ground loot fixture')
       const { instance, binding } = groundContext(seat)
       const grant = fixtureGroundGrant(instance, binding.characterId, content, { label, expiresAt: lootUtc + 120_000 })
       world.deliverCommittedGroundLoot(instance, [grant])
@@ -417,7 +429,7 @@ export async function startBrowserFixtureServer({
     approachSlime({ roomId, sessionId }, hp) {
       const connection = matchMaker.getLocalRoomById(roomId)?.clients.getById(sessionId)
       const binding = connection && room?.binding(connection)
-      if (!combatScenario || !binding) return false
+      if ((!combatScenario && !soloLoopScenario) || !binding) return false
       pendingApproach = { connection, characterId: binding.characterId, hp }
       return true
     },

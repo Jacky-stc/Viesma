@@ -22,21 +22,26 @@ export function createGroundLootStore(maps: readonly NormalizedMap[]) {
   const active = new Set<LootId>()
   const views = new Map<CharacterId, Map<MapInstanceId, GroundLootState>>()
   const emptyView: GroundLootState = { revision: 0, loot: new Map() }
+  let mutationVersion = 0
 
-  function publishView(delivery: GroundDelivery, visible = delivery.status === 'GROUND') {
-    const { grant, mapInstanceId, position } = delivery
-    let instances = views.get(grant.ownerCharacterId)
-    if (!instances) {
-      instances = new Map()
-      views.set(grant.ownerCharacterId, instances)
-    }
-    const previous = instances.get(mapInstanceId)
+  function nextView(delivery: GroundDelivery, previous: GroundLootState | undefined, visible: boolean): GroundLootState {
+    const { grant, position } = delivery
     const loot = new Map(previous?.loot)
     if (visible) {
       const { lootId, expiresAtUtcMilliseconds, content } = grant
       loot.set(lootId, Object.freeze({ lootId, expiresAtUtcMilliseconds, content, position }))
     } else loot.delete(grant.lootId)
-    instances.set(mapInstanceId, { revision: (previous?.revision ?? 0) + 1, loot })
+    return { revision: (previous?.revision ?? 0) + 1, loot }
+  }
+
+  function publishView(delivery: GroundDelivery, visible = delivery.status === 'GROUND') {
+    const { grant, mapInstanceId } = delivery
+    let instances = views.get(grant.ownerCharacterId)
+    if (!instances) {
+      instances = new Map()
+      views.set(grant.ownerCharacterId, instances)
+    }
+    instances.set(mapInstanceId, nextView(delivery, instances.get(mapInstanceId), visible))
   }
 
   function transition(delivery: GroundDelivery, status: 'PICKED' | 'EXPIRED'): void {
@@ -44,12 +49,26 @@ export function createGroundLootStore(maps: readonly NormalizedMap[]) {
     records.set(delivery.grant.lootId, next)
     active.delete(delivery.grant.lootId)
     publishView(next)
+    mutationVersion++
+  }
+
+  function place(mapId: MapId, deathPosition: WorldPoint): WorldPoint {
+    const placement = placements.get(mapId)
+    if (!placement) throw new RangeError('Missing loot placement for delivery map')
+    return Object.freeze(placement.place(deathPosition))
   }
 
   return {
-    prepareDelivery(grants: readonly CommittedLootRoll[], mapId: MapId, mapInstanceId: MapInstanceId, nowUtc: number) {
-      const placement = placements.get(mapId)
-      if (!placement) throw new RangeError('Missing loot placement for delivery map')
+    place,
+    prepareDelivery(
+      grants: readonly CommittedLootRoll[],
+      mapId: MapId,
+      mapInstanceId: MapInstanceId,
+      nowUtc: number,
+      frozenPosition?: WorldPoint
+    ) {
+      if (!placements.has(mapId)) throw new RangeError('Missing loot placement for delivery map')
+      const expectedVersion = mutationVersion
       const staged = new Map<LootId, GroundDelivery>()
       for (const grant of grants) {
         if (grant.mapId !== mapId || grant.placement.sourceMapInstanceId !== mapInstanceId)
@@ -70,25 +89,31 @@ export function createGroundLootStore(maps: readonly NormalizedMap[]) {
               placement: Object.freeze({ ...grant.placement, deathPosition: Object.freeze({ ...grant.placement.deathPosition }) }),
             }),
             mapInstanceId,
-            position: Object.freeze({ ...placement.place(grant.placement.deathPosition) }),
+            position: frozenPosition ?? place(mapId, grant.placement.deathPosition),
             status: nowUtc < grant.expiresAtUtcMilliseconds ? 'GROUND' : 'EXPIRED',
           })
         )
       }
-      return () => {
-        // 再檢查整批 identity 後，在同一提交回合發布。
-        for (const [id, delivery] of staged) {
-          const existing = records.get(id)
-          if (existing && !isDeepStrictEqual(existing.grant, delivery.grant)) throw new Error('Conflicting committed loot identity')
-        }
-        for (const [id, delivery] of staged) {
-          if (records.has(id)) continue
-          records.set(id, delivery)
-          if (delivery.status === 'GROUND') {
-            active.add(id)
-            publishView(delivery)
+      const ownerViews = new Map<CharacterId, Map<MapInstanceId, GroundLootState>>()
+      for (const delivery of staged.values()) {
+        if (delivery.status !== 'GROUND') continue
+        const owner = delivery.grant.ownerCharacterId
+        const instances = ownerViews.get(owner) ?? new Map(views.get(owner))
+        instances.set(mapInstanceId, nextView(delivery, instances.get(mapInstanceId), true))
+        ownerViews.set(owner, instances)
+      }
+      return {
+        validate() {
+          if (expectedVersion !== mutationVersion) throw new Error('Stale staged ground delivery')
+        },
+        publish() {
+          for (const [id, delivery] of staged) {
+            records.set(id, delivery)
+            if (delivery.status === 'GROUND') active.add(id)
           }
-        }
+          for (const [owner, instances] of ownerViews) views.set(owner, instances)
+          if (staged.size) mutationVersion++
+        },
       }
     },
     view(owner: CharacterId, instance: MapInstanceId): GroundLootState {
@@ -116,6 +141,7 @@ export function createGroundLootStore(maps: readonly NormalizedMap[]) {
           records.set(id, next)
           publishView(current, false)
           publishView(next)
+          mutationVersion++
         }
       }
     },
