@@ -1,8 +1,9 @@
 import { Client, type Room } from '@colyseus/sdk'
-import { toSimulationTick } from '@viesma/domain'
+import { toSimulationTick, type Attributes } from '@viesma/domain'
 import { initialPhysicsBalance, loadGrayboxGameData, serializeMapManifest, type NormalizedMap } from '@viesma/game-data'
 import { MapRoomSchema, readPublicMonsters, readPublicPlayers, type MapRoomState } from '@viesma/network-colyseus'
 import {
+  allocateApMessage,
   cancelTransferMessage,
   combatDamageMessage,
   inputFrameMessage,
@@ -10,15 +11,19 @@ import {
   mapRoomJoinedMessage,
   mapRoomName,
   movementCheckpointMessage,
+  ownerProgressionMessage,
   parseMapRoomSession,
   parseMovementCheckpoint,
+  parseOwnerProgression,
   parseTransferFailure,
   parseTransferOffer,
   PROTOCOL_VERSION,
   transferFailureMessage,
   transferOfferMessage,
+  type ApResultCode,
   type MapRoomSession,
   type OnlineMapId,
+  type OwnerProgression,
   type PublicPlayer,
   type TransferOffer,
 } from '@viesma/protocol'
@@ -40,6 +45,9 @@ import { createRemotePresentation } from './remote-presentation'
 export type MultiplayerPresentation = Pick<PublicPlayer, 'hp' | 'maxHp' | 'state' | 'facing' | 'spawnProtected'> & {
   readonly players: number
   readonly mapName: string
+  readonly progression: OwnerProgression | undefined
+  readonly apStatus: 'PENDING' | ApResultCode | undefined
+  readonly allocateAp: (deltas: Attributes, snapshot: OwnerProgression) => boolean
 }
 
 interface RoomLocation {
@@ -56,6 +64,8 @@ interface RoomScene {
   readonly remote: ReturnType<typeof createRemotePresentation>
   readonly combat: ReturnType<typeof createCombatPresentation>
   binding?: MapRoomSession
+  progression?: OwnerProgression
+  ap?: { readonly requestId: number; readonly status: 'PENDING' | ApResultCode }
   prediction?: ReturnType<typeof createLocalPrediction>
   latest?: { self: PublicPlayer; serverTick: number; mapInstanceId: string }
   recoveryTarget?: { readonly requestId: number | null; readonly location: RoomLocation } | undefined
@@ -149,6 +159,7 @@ export async function runMultiplayer(
   publish: (presentation: MultiplayerPresentation) => void,
   publishStatus: (status: string) => void,
   disconnect: () => void,
+  toggleApPanel: () => void,
   signal: AbortSignal
 ): Promise<void> {
   if (signal.aborted) return
@@ -184,6 +195,35 @@ export async function runMultiplayer(
   let driver: FixedTickDriver | undefined
   let localTick = toSimulationTick(0)
   let sceneRevision = 0
+  let latestCharacterVersion = -1
+
+  function allocateAp(deltas: Attributes, snapshot: OwnerProgression): boolean {
+    const scene = active
+    const binding = scene?.binding
+    if (
+      !scene ||
+      !binding ||
+      travel ||
+      recovery ||
+      !scene.room.connection.isOpen ||
+      scene.latest?.self.state === 'death' ||
+      scene.ap?.status === 'PENDING' ||
+      snapshot.connectionEpoch !== binding.connectionEpoch ||
+      snapshot.mapEpoch !== binding.mapEpoch
+    )
+      return false
+    const requestId = (scene.ap?.requestId ?? 0) + 1
+    scene.ap = { requestId, status: 'PENDING' }
+    scene.room.send(allocateApMessage, {
+      protocolVersion: PROTOCOL_VERSION,
+      connectionEpoch: binding.connectionEpoch,
+      mapEpoch: binding.mapEpoch,
+      expectedCharacterVersion: snapshot.characterVersion,
+      requestId,
+      deltas,
+    })
+    return true
+  }
 
   function stopInput(scene: RoomScene) {
     driver = undefined
@@ -319,6 +359,7 @@ export async function runMultiplayer(
         unbindJoin()
         unbindCheckpoint()
         unbindCombatDamage()
+        unbindProgression()
         unbindOffer()
         unbindFailure()
         room.onStateChange.remove(receiveState)
@@ -384,6 +425,25 @@ export async function runMultiplayer(
     })
     const unbindCombatDamage = room.onMessage(combatDamageMessage, (payload: unknown) => {
       if (isCurrent() && active === scene && !recovery) scene.combat.receive(payload, performance.now())
+    })
+    const unbindProgression = room.onMessage(ownerProgressionMessage, (payload: unknown) => {
+      const { binding } = scene
+      if (!isCurrent() || !binding || (recovery && active === scene)) return
+      const update = parseOwnerProgression(payload)
+      if (
+        !update ||
+        update.characterId !== binding.characterId ||
+        update.connectionEpoch !== binding.connectionEpoch ||
+        update.mapEpoch !== binding.mapEpoch ||
+        update.characterVersion < latestCharacterVersion
+      )
+        return
+      latestCharacterVersion = update.characterVersion
+      if (scene.progression?.characterVersion !== update.characterVersion) scene.progression = update
+      const { result } = update
+      if (result && scene.ap?.status === 'PENDING' && result.requestId === scene.ap.requestId) {
+        scene.ap = { requestId: result.requestId, status: result.code }
+      }
     })
     const unbindCheckpoint = room.onMessage(movementCheckpointMessage, (payload: unknown) => {
       const { binding, latest, correction } = scene
@@ -529,6 +589,7 @@ export async function runMultiplayer(
         if (active !== scene || !driver || !prediction.ready || !room.connection.isOpen) return undefined
         localTick = tick
         const intent = input.sample()
+        if (intent.actions.includes('ap')) toggleApPanel()
         const controller = prediction.predicted?.controller
         if (intent.portalPressed && controller) {
           const portal = findOverlappingPortal(scene.map, controller.position)
@@ -641,16 +702,19 @@ export async function runMultiplayer(
       if (host.dataset.combatDamageSeen !== damageSeen) host.dataset.combatDamageSeen = damageSeen
     }
     const players = peers.size + 1
+    const apStatus = scene.ap?.status
     if (
       players !== previous?.players ||
       hp !== previous.hp ||
       maxHp !== previous.maxHp ||
       spawnProtected !== previous.spawnProtected ||
       state !== previous.state ||
-      facing !== previous.facing
+      facing !== previous.facing ||
+      scene.progression !== previous.progression ||
+      apStatus !== previous.apStatus
     ) {
       const mapName = data.world.maps.find(({ id }) => id === scene.map.id)?.name ?? scene.map.id
-      previous = { hp, maxHp, state, facing, players, mapName, spawnProtected }
+      previous = { hp, maxHp, state, facing, players, mapName, spawnProtected, progression: scene.progression, apStatus, allocateAp }
       publish(previous)
     }
   }

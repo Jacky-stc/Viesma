@@ -1,21 +1,43 @@
-import { isNonNegativeSafeInteger, toSimulationTick, type CharacterId, type MapInstanceId, type SimulationTick } from '@viesma/domain'
-import { getBeginnerCombatStats, type GameData, type NormalizedMap } from '@viesma/game-data'
 import {
+  attributeNames,
+  isNonNegativeSafeInteger,
+  toSimulationTick,
+  type CharacterAggregate,
+  type CharacterId,
+  type DeathId,
+  type DerivedCombatStats,
+  type MapInstanceId,
+  type SimulationTick,
+} from '@viesma/domain'
+import { deriveCombatStats, getStarterWeaponModifiers, initialBaseAttributes, type GameData, type NormalizedMap } from '@viesma/game-data'
+import {
+  parseAllocateAp,
   parsePortalRequest,
+  PROTOCOL_VERSION,
+  readApRequestId,
+  type AllocateApRequest,
+  type ApResultCode,
+  type MapRoomJoin,
   type MapRoomSession,
   type OnlineMapId,
+  type OwnerProgression,
   type PortalRequest,
   type TransferFailure,
   type TransferOffer,
 } from '@viesma/protocol'
 import {
+  allocateAttributes,
+  allocateSoloExperience,
   canUseGroundedInteraction,
+  createCharacterAggregate,
   createFixedTickDriver,
   findOverlappingPortal,
+  grantExperience,
   maxCatchUpTicks,
   placePlayerAtSpawn,
   respawnPlayer,
   ticksPerSecond,
+  type EncounterRewardIntent,
   type MonotonicClock,
   type PartyMembership,
 } from '@viesma/simulation'
@@ -41,11 +63,24 @@ export interface RoomPeer {
   readonly joined: (session: MapRoomSession) => void
   readonly offer: (offer: TransferOffer) => void
   readonly failed: (failure: TransferFailure) => void
+  readonly progression?: (snapshot: OwnerProgression) => void
   readonly close: () => void
+}
+
+interface CharacterProgression {
+  aggregate: CharacterAggregate
+  stats: DerivedCombatStats
+  readonly grantedDeaths: Set<DeathId>
+}
+
+interface ApCommand {
+  readonly request: AllocateApRequest
+  result?: ApResultCode
 }
 
 interface CharacterRoute {
   readonly characterId: CharacterId
+  readonly progression: CharacterProgression
   reconnectToken: string
   unconfirmedToken: string | undefined
   room: MapRuntime
@@ -54,6 +89,7 @@ interface CharacterRoute {
   lastPortalRequestId: number
   portal: PortalRequest | undefined
   transfer: Transfer | undefined
+  apCommand?: ApCommand
   nextRespawnMilliseconds: number
 }
 
@@ -102,16 +138,17 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     throw new RangeError('M3.4 requires the M1 and Village maps and their development spawns')
   const maps = { m1, village }
   const spawns = { m1: m1Spawn, village: villageSpawn }
-  const playerStats = getBeginnerCombatStats(data)
+  const starterModifiers = getStarterWeaponModifiers(data)
+  const starterStats = deriveCombatStats(1, initialBaseAttributes, starterModifiers)
   const monsterSpawns = {
     m1: { definitions: getMonsterSpawnDefinitions(data, m1), maxActive: data.world.maxMonstersPerMap },
     village: { definitions: getMonsterSpawnDefinitions(data, village), maxActive: data.world.maxMonstersPerMap },
   }
 
   const { clock, schedule, nextId, onBacklog, createDestination } = dependencies
-  const rewards = createEncounterRewardWorker(dependencies.rewardPort)
+  const rewards = createEncounterRewardWorker(dependencies.rewardPort, prepareSoloReward)
   const combat = {
-    playerStats,
+    playerStats: (characterId: CharacterId) => routes.get(characterId)?.progression.stats ?? starterStats,
     balanceVersion: data.balanceVersion,
     rewards,
     ...(dependencies.partyMembership && { partyMembership: dependencies.partyMembership }),
@@ -135,6 +172,95 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
 
   const canAdmit = () => backlogTicks === 0 && !catchingUp
   const registered = (room: MapRuntime) => rooms.get(room.mapInstanceId) === room
+
+  function commitProgression(progression: CharacterProgression, aggregate: CharacterAggregate, stats: DerivedCombatStats): void {
+    progression.aggregate = aggregate
+    progression.stats = stats
+    routes.get(aggregate.characterId)?.room.updatePlayerMaxima(aggregate.characterId, stats)
+  }
+
+  function prepareSoloReward({ claim, groups }: EncounterRewardIntent) {
+    const { deathId, mapId, spawnId } = claim
+    const definitions = mapId === maps.m1.id ? monsterSpawns.m1.definitions : monsterSpawns.village.definitions
+    const baseExp = definitions.find((spawn) => spawn.spawnId === spawnId)?.baseExp
+    const grants = allocateSoloExperience(baseExp ?? 0, groups).flatMap(({ characterId, exp }) => {
+      const progression = routes.get(characterId)?.progression
+      return progression ? [{ progression, exp }] : []
+    })
+    // 保留死亡時已接受的授予目標，來源房與目前綁定可在 receipt 到達前消失。
+    return () => {
+      const changes = grants.flatMap(({ progression, exp }) => {
+        if (progression.grantedDeaths.has(deathId)) return []
+        const aggregate = grantExperience(progression.aggregate, exp, data.progression)
+        if (aggregate === progression.aggregate) return []
+        const stats = deriveCombatStats(aggregate.level, aggregate.baseAttributes, starterModifiers)
+        return [{ progression, aggregate, stats }]
+      })
+      for (const { progression, aggregate, stats } of changes) {
+        commitProgression(progression, aggregate, stats)
+        if (aggregate.level === data.progression.levelCap) progression.grantedDeaths.clear()
+        else progression.grantedDeaths.add(deathId)
+      }
+      return Object.freeze(changes.map(({ aggregate: { characterId, version } }) => Object.freeze({ characterId, version })))
+    }
+  }
+
+  function progressionSnapshot(route: CharacterRoute, binding: MapRoomJoin, result?: OwnerProgression['result']): OwnerProgression {
+    const { aggregate, stats } = route.progression
+    const { version, level, expWithinLevel, unspentAp, baseAttributes } = aggregate
+    return {
+      ...binding,
+      protocolVersion: PROTOCOL_VERSION,
+      characterVersion: version,
+      level,
+      expWithinLevel,
+      nextLevelExp: data.progression.expToNextLevel[level - 1] ?? null,
+      unspentAp,
+      baseAttributes,
+      stats,
+      ...(result && { result }),
+    }
+  }
+
+  function reportAp(route: CharacterRoute, binding: MapRoomJoin, requestId: number, code: ApResultCode): void {
+    try {
+      route.peer?.progression?.(progressionSnapshot(route, binding, { requestId, code }))
+    } catch {
+      // 結案已留存；重送或重連可取得權威快照。
+    }
+  }
+
+  function matchesBinding(binding: MapRoomJoin, request: AllocateApRequest): boolean {
+    return request.connectionEpoch === binding.connectionEpoch && request.mapEpoch === binding.mapEpoch
+  }
+
+  function canAllocateAp(route: CharacterRoute): boolean {
+    const body = route.room.player(route.characterId)
+    return !route.transfer && body !== undefined && body.action.kind !== 'death' && body.vitals.hp > 0
+  }
+
+  function advanceAp(route: CharacterRoute): void {
+    const { peer, room, apCommand, progression } = route
+    if (!peer || !apCommand || apCommand.result) return
+    const binding = room.binding(peer.connection)
+    const { request } = apCommand
+    if (!binding || !matchesBinding(binding, request)) return
+
+    function allocate(): ApResultCode {
+      if (!canAllocateAp(route)) return 'UNAVAILABLE'
+      if (request.expectedCharacterVersion !== progression.aggregate.version) return 'STALE_VERSION'
+      const result = allocateAttributes(progression.aggregate, request.deltas)
+      if ('code' in result) return result.code
+      if (result.character !== progression.aggregate) {
+        const { level, baseAttributes } = result.character
+        commitProgression(progression, result.character, deriveCombatStats(level, baseAttributes, starterModifiers))
+      }
+      return 'CONFIRMED'
+    }
+
+    apCommand.result = allocate()
+    reportAp(route, binding, request.requestId, apCommand.result)
+  }
 
   function clearTransfer(route: CharacterRoute, reservationConsumed = false) {
     const transfer = route.transfer
@@ -335,7 +461,10 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
       { nowMilliseconds: () => wakeMilliseconds },
       (frame) => {
         rewards.advance()
-        for (const route of routes.values()) advanceRoute(route, frame.tick, wakeMilliseconds)
+        for (const route of routes.values()) {
+          advanceRoute(route, frame.tick, wakeMilliseconds)
+          advanceAp(route)
+        }
         for (const id of [...rooms.keys()].sort()) rooms.get(id)?.advance(frame, wakeMilliseconds)
         tick = frame.tick
       },
@@ -422,6 +551,7 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
       const reconnectToken = nextId()
       const route: CharacterRoute = {
         characterId,
+        progression: { aggregate: createCharacterAggregate(characterId), stats: starterStats, grantedDeaths: new Set() },
         room,
         peer,
         reconnectToken,
@@ -512,6 +642,40 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
       route.portal = request
       clearUnconfirmedToken(route)
       return true
+    },
+    requestAp(room: MapRuntime, connection: object, payload: unknown): void {
+      const route = connections.get(connection)
+      const binding = route?.room === room ? room.binding(connection) : undefined
+      const requestId = readApRequestId(payload)
+      if (!route || !binding || requestId === undefined) return
+      const request = parseAllocateAp(payload)
+      if (!request) return reportAp(route, binding, requestId, 'INVALID_ALLOCATION')
+      if (!matchesBinding(binding, request)) return reportAp(route, binding, requestId, 'STALE_BINDING')
+
+      const latest = route.apCommand
+      if (latest && matchesBinding(binding, latest.request)) {
+        if (requestId < latest.request.requestId) return reportAp(route, binding, requestId, 'STALE_REQUEST')
+        if (requestId === latest.request.requestId) {
+          const same =
+            latest.request.expectedCharacterVersion === request.expectedCharacterVersion &&
+            attributeNames.every((name) => latest.request.deltas[name] === request.deltas[name])
+          if (!same) return reportAp(route, binding, requestId, 'REQUEST_CONFLICT')
+          if (latest.result) reportAp(route, binding, requestId, latest.result)
+          return
+        }
+        if (!latest.result) return reportAp(route, binding, requestId, 'BUSY')
+      }
+      if (!canAllocateAp(route)) {
+        route.apCommand = { request, result: 'UNAVAILABLE' }
+        return reportAp(route, binding, requestId, 'UNAVAILABLE')
+      }
+      route.apCommand = { request }
+      clearUnconfirmedToken(route)
+    },
+    progression(room: MapRuntime, connection: object, afterVersion = -1): OwnerProgression | undefined {
+      const route = connections.get(connection)
+      const binding = route?.room === room ? room.binding(connection) : undefined
+      if (route && binding && route.progression.aggregate.version > afterVersion) return progressionSnapshot(route, binding)
     },
     cancelTransfer(room: MapRuntime, connection: object, ticket: string): void {
       const route = connections.get(connection)

@@ -1,4 +1,4 @@
-export const PROTOCOL_VERSION = 4
+export const PROTOCOL_VERSION = 5
 
 export interface JoinVersion {
   readonly protocolVersion: number

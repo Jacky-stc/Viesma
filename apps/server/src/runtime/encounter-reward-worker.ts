@@ -27,6 +27,7 @@ export function createMemoryEncounterRewardPort(): EncounterRewardPort {
 
 interface RewardJob {
   readonly intent: EncounterRewardIntent
+  readonly commitProgression: (() => RewardReceipt['resultingVersions']) | undefined
   retainedByEncounter: boolean
   state:
     { readonly kind: 'ready' } | { readonly kind: 'processing' } | { readonly kind: 'committed'; readonly receipt: EncounterRewardReceipt }
@@ -34,7 +35,10 @@ interface RewardJob {
 
 const pendingAdmissionLimit = 256
 
-export function createEncounterRewardWorker(port: EncounterRewardPort = createMemoryEncounterRewardPort()) {
+export function createEncounterRewardWorker(
+  port: EncounterRewardPort = createMemoryEncounterRewardPort(),
+  prepareProgression?: (intent: EncounterRewardIntent) => () => RewardReceipt['resultingVersions']
+) {
   const jobs = new Map<DeathId, RewardJob>()
   const completions = new Map<DeathId, EncounterRewardReceipt | undefined>()
   let pending = 0
@@ -50,7 +54,7 @@ export function createEncounterRewardWorker(port: EncounterRewardPort = createMe
     accept(intent: EncounterRewardIntent): boolean {
       const { deathId } = intent.claim
       if (jobs.has(deathId)) return false
-      jobs.set(deathId, { intent, retainedByEncounter: true, state: { kind: 'ready' } })
+      jobs.set(deathId, { intent, commitProgression: prepareProgression?.(intent), retainedByEncounter: true, state: { kind: 'ready' } })
       pending++
       return true
     },
@@ -78,7 +82,11 @@ export function createEncounterRewardWorker(port: EncounterRewardPort = createMe
           job.state = { kind: 'ready' }
           continue
         }
-        job.state = { kind: 'committed', receipt }
+        const resultingVersions = job.commitProgression?.()
+        job.state = {
+          kind: 'committed',
+          receipt: resultingVersions ? Object.freeze({ ...receipt, resultingVersions }) : receipt,
+        }
         pending--
         if (!job.retainedByEncounter) release(deathId)
       }

@@ -23,6 +23,14 @@ export {
   type TransferOffer,
 } from './map-travel.js'
 export { parseMovementCheckpoint, type MovementCheckpoint } from './movement-checkpoint.js'
+export {
+  parseAllocateAp,
+  parseOwnerProgression,
+  readApRequestId,
+  type AllocateApRequest,
+  type ApResultCode,
+  type OwnerProgression,
+} from './progression.js'
 
 export const mapRoomName = 'map'
 export const villageMapRoomName = 'village'
@@ -34,3 +42,5 @@ export const interactPortalMessage = 'InteractPortal'
 export const transferOfferMessage = 'TransferOffer'
 export const transferFailureMessage = 'TransferFailure'
 export const cancelTransferMessage = 'CancelTransfer'
+export const allocateApMessage = 'AllocateAP'
+export const ownerProgressionMessage = 'OwnerProgression'

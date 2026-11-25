@@ -106,7 +106,7 @@ M0.2 建立 `domain`、`physics`、`simulation`、`protocol` 與 `network-colyse
 | Combat validation／damage contribution | Server combat step；encounter-local ledger | 送 attack input，播放已確認結果 |
 | Party membership／leader／invite | Process-global PartyService，獨立於 map | UI／command；map transition 不重建 party |
 | Eligibility／group pool／EXP／loot roll | Server reward snapshot＋pure policy＋reward worker | 只顯示 owner 的結果 |
-| Level／AP／base attributes／currency | CharacterCoordinator；MVP-B commit 後的 PostgreSQL 為 durable truth | 用 private snapshot 顯示，送意圖 |
+| Level／AP／base attributes／currency | M5.1 成長由 WorldCoordinator 持有。後續 economy 由 CharacterCoordinator 排序，MVP-B commit 後的 PostgreSQL 為 durable truth | 用 private snapshot 顯示，送意圖 |
 | Bag／equipment／pickup／consume | CharacterCoordinator＋InventoryRepository transaction | 不能樂觀修改已確認 inventory |
 | Persistent character record | PostgreSQL；只有 repository adapter 寫入 | HTTP selection 或 owner-only snapshot |
 | Camera／animation／touch／HUD | Client | 不影響 collision 或 economy |
@@ -193,7 +193,7 @@ Client 以同樣30Hz跑 local physics，render 以 `requestAnimationFrame` 自�
 | `InputFrame` | `protocolVersion, connectionEpoch, mapEpoch, seq, moveX, jumpPressed, attackPressed` | 30Hz；moveX 僅 -1／0／1，jump／attack 為單次 edge；不接收 damage／EXP／absolute position |
 | `InteractPortal`／`InteractNpc` | `requestId, mapEpoch, objectId` | Portal 由 Up 按下邊緣發起，server 驗證來源交疊後解析目的地。NPC 由互動按鍵發起。 |
 | `PickupLoot` | `requestId, sessionEpoch, mapEpoch, lootId` | 重新驗證 owner、距離、expiry、容量 |
-| `AllocateAP` | `requestId, sessionEpoch, deltas` | 非負 integers，總額與 invariant 驗證 |
+| `AllocateAP` | `protocolVersion, requestId, connectionEpoch, mapEpoch, expectedCharacterVersion, deltas` | 由目前 socket 綁定辨識本人，驗證角色狀態、版本與整數增量 |
 | `EquipItem`／`UnequipItem`／`ConsumeItem` | `requestId, sessionEpoch, itemInstanceId/slot, expectedCharacterVersion` | version stale 回傳最新 snapshot，不能套用 client bag |
 | `PartyCommand` | `requestId, type, targetId/inviteId, expectedPartyRevision` | PartyService 序列處理；不信任 client roster |
 
@@ -211,6 +211,7 @@ Input seq 在 connection epoch 內單調遞增。Server 拒絕舊 epoch、已見
 - **Self movement checkpoint，10 Hz owner-only**。`MovementCheckpoint` 在同 tick 的 public patch 之後由 server 專門發給本人，帶版本、角色、map instance、connection／map epoch、生命開始 tick 及 server tick。`ackInputSeq` 是累積結案邊界，初值為 `null`，在權威步進完成後才更新。它涵蓋已套用、衝突、過期、淘汰或滿隊拒收的幀，以及較新序號關閉的缺口。ACK 不跨過最早未決幀，佇列清空後涵蓋已結案的尾端。控制器自己的 `lastProcessedInputSeq` 和 `lastInputTick` 則記錄實際套用的輸入。完整狀態包含 position、velocity、grounded／void、水平意圖、jump buffer／coyote、facing、locomotion、action 及最近受擊 tick。HP／MaxHP 沿用公開投影。
 - **Reliable visual messages**：attack／damage／death／respawn event，含 eventId 與 tick；純顯示事件可在 reconnect 丟棄，不重播舊 damage numbers。EventId 做短期去重。
 - **Owner-only messages**：character／bag／equipment snapshot、loot snapshot／delta、request result、reward receipt。`privateRevision` 不連續時重新要求完整 snapshot；重新入房／重連一定重建完整 owner view。
+- **M5.1（protocol 5）**。`OwnerProgression` 綁定 `characterId`、`connectionEpoch` 與 `mapEpoch`，在入房／重連及角色版本變更時傳送全量進度，可附 AP 請求的結案碼。較舊版本的快照不得覆寫已確認資料。
 - **Party-only messages**：PartyService 對所有 connected members 發送 revisioned full snapshot，包含同／跨 map 的 member 摘要。不同 party 收不到 invite／roster 私有資料。
 
 Personal loot／inventory **不放 public room Schema**；預設用 server 指定 client 的 reliable messages，靠完整 private snapshot 修復斷線，而不是只在畫面過濾。將來若用 StateView 也須有 payload isolation tests；不是目前必需依賴。
@@ -265,6 +266,8 @@ M4.2 在角色控制器與怪物 FSM 步進後，以同一份 map state 先結�
 M4.3 將 first-hit lock、角色累計傷害、最近傷害 tick 與已使用的 attack IDs 留在 monster encounter。Return 到出生點時銷毀帳本。死亡時帳本轉成唯讀快照，包含當前 `balanceVersion`、各組傷害及 [GAME_DESIGN §6.3](GAME_DESIGN.md#63-death-time-eligibility) 的合格角色。MapRuntime 從當前 seat 提供 connected 狀態、以交接前的凍結排除 transfer 角色，並可注入權威 party membership 查詢。佇列接受的意圖由 world reward worker 持有，完成回呼只提供結果，由下一次固定 tick 接受 receipt。記憶體 port 按 deathId 重用 receipt，提交失敗或確認遺失時保留原意圖重試；房間釋放後已接受的工作仍可完成。未完成意圖達 256 時停止接受新 swings，已接受的 swings 依固定 tick 結算。記憶體 receipt 僅記錄完成，角色 version 集合為空。
 
 M4.4 同一固定 tick 驗證 receipt 的 deathId、monsterId、generation 與 encounterId。確認 tick C 進入 Dead，C + 30 進入 RespawnWait，C + 330 於原 spawn 以新 monsterId、遞增 generation 與新 encounterId 進入 Spawning，下一 tick 進入 Patrol。前一世代接受的 swing 不會命中新世代。房間銷毀只釋放對 receipt 的保留，原工作仍由 world worker 完成。
+
+M5.1 的匿名角色由 WorldCoordinator 持有一份記憶體成長 aggregate，入房時建立，換圖與保留席位期間的重連沿用同一份。Reward worker 收下凍結意圖時保留單人授予目標。記憶體 port receipt 通過身分驗證後，在固定 tick 內先套用單人 EXP 並更新版本，再完成 encounter receipt。AP 在同一世界 tick 內、交接判定後與戰鬥步進前處理，使用當下的版本和角色狀態。請求 ID 在目前連線 epoch 內遞增，最近一次結案可重送，同 ID 變更內容須拒絕。完整的 EXP 與 ground grants 交易及故障驗證屬 M5.5。
 
 後續完整獎勵依下列契約交付。
 

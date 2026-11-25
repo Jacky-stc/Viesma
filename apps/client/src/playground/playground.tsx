@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { touchControls } from '../input/browser-input'
 import type { AuxiliaryAction } from '../input/input-state'
 import type { MultiplayerPresentation } from '../multiplayer/run-multiplayer'
+import { ApPanel } from './ap-panel'
 import { runPlayground, type PlaygroundMode, type PlaygroundPresentation } from './run-playground'
 import type { DebugDamage } from './scene'
 
@@ -32,6 +33,7 @@ export function Playground() {
   const hostRef = useRef<HTMLDivElement>(null)
   const surfaceRef = useRef<HTMLElement>(null)
   const helpRef = useRef<HTMLDialogElement>(null)
+  const apRef = useRef<HTMLDialogElement>(null)
   const startup = useRef(Promise.resolve())
   const pendingDebugDamage = useRef<DebugDamage>(undefined)
   const pendingGuideClose = useRef<GuideInteraction>(undefined)
@@ -45,6 +47,7 @@ export function Playground() {
   const interactive = active && mode === 'interactive'
   const online = active && mode === 'multiplayer'
   const controlsReady = (interactive && presentation) || (online && multiplayer && !failed)
+  const progression = online && !failed ? multiplayer?.progression : undefined
   const guide = presentation?.guide
   const guideInteraction = presentation?.guideInteraction
 
@@ -78,7 +81,7 @@ export function Playground() {
       .then(async () => {
         if (mode === 'multiplayer') {
           const { runMultiplayer } = await import('../multiplayer/run-multiplayer')
-          return runMultiplayer(host, surface, setMultiplayer, setMultiplayerStatus, failedStartup, controller.signal)
+          return runMultiplayer(host, surface, setMultiplayer, setMultiplayerStatus, failedStartup, toggleApPanel, controller.signal)
         }
         return runPlayground(host, surface, mode, setPresentation, setActions, controller.signal, takeGuideClose, takeDebugDamage)
       })
@@ -99,6 +102,12 @@ export function Playground() {
   function toggleScene() {
     resetStatus()
     setActive(!active)
+  }
+
+  function toggleApPanel() {
+    const panel = apRef.current
+    if (panel?.open) panel.close()
+    else panel?.showModal()
   }
 
   return (
@@ -209,6 +218,14 @@ export function Playground() {
                     {text}
                   </button>
                 ))}
+                {progression && (
+                  <button
+                    type="button"
+                    onClick={toggleApPanel}
+                  >
+                    能力點數
+                  </button>
+                )}
               </div>
             </div>
             {controlsReady && <p className="playground-rotate">請將裝置轉為橫向以操作。</p>}
@@ -239,7 +256,10 @@ export function Playground() {
         <h2 id="playground-help-title">操作說明</h2>
         <p>點一下場景或用 Tab 移入焦點，再使用以下按鍵。</p>
         {mode === 'multiplayer' ? (
-          <p>可使用 ←／A、→／D 與 Space 移動及跳躍。站在 Village 或 M1 的傳送門內，按 ↑／W 或觸控 ↑ 往返。</p>
+          <p>
+            可使用 ←／A、→／D 與 Space 移動及跳躍。站在 Village 或 M1 的傳送門內，按 ↑／W 或觸控 ↑ 往返。按 K
+            或點觸控「能力點數」查看成長與配置 AP。
+          </p>
         ) : (
           <>
             <ul>
@@ -264,6 +284,41 @@ export function Playground() {
           <button type="submit">關閉</button>
         </form>
       </dialog>
+      {online && (
+        <dialog
+          className="playground-help ap-panel"
+          aria-labelledby="ap-panel-title"
+          ref={apRef}
+          onClose={() => surfaceRef.current?.focus({ preventScroll: true })}
+          onKeyDown={(event) => {
+            if (event.code === 'KeyK' && !event.repeat && !event.altKey && !event.ctrlKey && !event.metaKey) {
+              event.preventDefault()
+              toggleApPanel()
+            }
+          }}
+        >
+          <header>
+            <h2 id="ap-panel-title">能力點數</h2>
+            <button
+              type="button"
+              onClick={toggleApPanel}
+            >
+              關閉
+            </button>
+          </header>
+          {progression && multiplayer ? (
+            <ApPanel
+              key={progression.connectionEpoch}
+              snapshot={progression}
+              status={multiplayer.apStatus}
+              unavailable={Boolean(multiplayerStatus) || multiplayer.state === 'death'}
+              allocate={multiplayer.allocateAp}
+            />
+          ) : (
+            <p>等待角色進度…</p>
+          )}
+        </dialog>
+      )}
       <footer className="playground-footer">
         <ul aria-label="碰撞圖例">
           <li className="legend-solid">實體地形</li>
@@ -299,6 +354,24 @@ export function Playground() {
                 HP {multiplayer.hp} / {multiplayer.maxHp}
               </span>
               <span aria-label="同房角色數">同房 {multiplayer.players} 人</span>
+              {progression && (
+                <>
+                  <span>Lv. {progression.level}</span>
+                  <span>
+                    {progression.nextLevelExp === null
+                      ? `EXP ${progression.expWithinLevel} · 已達上限`
+                      : `EXP ${progression.expWithinLevel} / ${progression.nextLevelExp}`}
+                  </span>
+                  <span>可用 AP {progression.unspentAp}</span>
+                  <button
+                    className="ap-hud-button"
+                    type="button"
+                    onClick={toggleApPanel}
+                  >
+                    能力點數（K）
+                  </button>
+                </>
+              )}
               {multiplayer.state === 'death' && <span role="status">已倒下，等待返回 Village</span>}
               {multiplayer.spawnProtected && <span role="status">重生保護</span>}
             </>

@@ -1,10 +1,13 @@
+import type { Attributes, DerivedCombatStats } from '@viesma/domain'
 import { initialBalanceVersion } from './initial-physics.js'
-import type { GameData } from './types.js'
+import { initialPlayerLifecycleBalance } from './player-lifecycle.js'
+import type { EquipmentModifiers, GameData } from './types.js'
 import { integer, invalid, maxBasisPoints } from './validation.js'
 
 export { maxBasisPoints }
 
 export const starterWeaponId = 'training_sword'
+export const initialBaseAttributes: Attributes = Object.freeze({ str: 4, dex: 4, int: 4, luk: 4 })
 
 export const initialPlayerAttackBalance = Object.freeze({
   balanceVersion: initialBalanceVersion,
@@ -19,28 +22,45 @@ export const initialPlayerAttackBalance = Object.freeze({
   criticalMultiplierPercent: 150,
 })
 
-export interface PlayerCombatStats {
-  readonly attackPower: number
-  readonly physicalDefense: number
-  readonly magicDefense: number
-  readonly criticalChanceBps: number
-}
+export type PlayerCombatStats = Pick<DerivedCombatStats, 'attackPower' | 'physicalDefense' | 'magicDefense' | 'criticalChanceBps'>
 
-export function getBeginnerCombatStats({ items }: Pick<GameData, 'items'>): PlayerCombatStats {
+export function getStarterWeaponModifiers({ items }: Pick<GameData, 'items'>): EquipmentModifiers {
   const weapon = items.find(({ id }) => id === starterWeaponId)
   if (!weapon || weapon.kind !== 'equipment' || weapon.slot !== 'weapon' || weapon.requiredLevel !== 1) {
     invalid('INVALID_VALUE', 'items.training_sword', 'Missing level-one starter weapon')
   }
-  const { modifiers } = weapon
-  const baseAttribute = 4
-  const str = baseAttribute + (modifiers.str ?? 0)
-  const dex = baseAttribute + (modifiers.dex ?? 0)
-  const int = baseAttribute + (modifiers.int ?? 0)
-  const luk = baseAttribute + (modifiers.luk ?? 0)
+  return weapon.modifiers
+}
+
+export function deriveCombatStats(level: number, base: Attributes, modifiers: EquipmentModifiers = {}): DerivedCombatStats {
+  const str = base.str + (modifiers.str ?? 0)
+  const dex = base.dex + (modifiers.dex ?? 0)
+  const int = base.int + (modifiers.int ?? 0)
+  const luk = base.luk + (modifiers.luk ?? 0)
   return Object.freeze({
-    attackPower: integer(Math.floor(8 + 2 * str + dex / 2 + (modifiers.attackPower ?? 0)), 'beginner.attackPower', 1),
-    physicalDefense: integer(Math.floor(dex / 4) + (modifiers.physicalDefense ?? 0), 'beginner.physicalDefense'),
-    magicDefense: integer(Math.floor(int / 2) + (modifiers.magicDefense ?? 0), 'beginner.magicDefense'),
-    criticalChanceBps: Math.min(2500, 500 + 25 * (luk - baseAttribute) + (modifiers.criticalChanceBps ?? 0)),
+    maxHp: integer(
+      initialPlayerLifecycleBalance.beginnerMaxHp + 10 * (level - 1) + 5 * (str - initialBaseAttributes.str) + (modifiers.maxHp ?? 0),
+      'character.maxHp',
+      1
+    ),
+    maxMp: integer(
+      initialPlayerLifecycleBalance.beginnerMaxMp + 5 * (level - 1) + 3 * (int - initialBaseAttributes.int) + (modifiers.maxMp ?? 0),
+      'character.maxMp',
+      1
+    ),
+    attackPower: integer(Math.floor(8 + 2 * str + dex / 2 + (modifiers.attackPower ?? 0)), 'character.attackPower', 1),
+    physicalDefense: integer(Math.floor(dex / 4) + (modifiers.physicalDefense ?? 0), 'character.physicalDefense'),
+    magicDefense: integer(Math.floor(int / 2) + (modifiers.magicDefense ?? 0), 'character.magicDefense'),
+    criticalChanceBps: Math.max(0, Math.min(2500, 500 + 25 * (luk - initialBaseAttributes.luk) + (modifiers.criticalChanceBps ?? 0))),
+    criticalMultiplierPercent: initialPlayerAttackBalance.criticalMultiplierPercent,
   })
+}
+
+export function getBeginnerCombatStats(data: Pick<GameData, 'items'>): PlayerCombatStats {
+  const { attackPower, physicalDefense, magicDefense, criticalChanceBps } = deriveCombatStats(
+    1,
+    initialBaseAttributes,
+    getStarterWeaponModifiers(data)
+  )
+  return Object.freeze({ attackPower, physicalDefense, magicDefense, criticalChanceBps })
 }

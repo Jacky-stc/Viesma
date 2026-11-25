@@ -24,6 +24,7 @@ import { createDestinationRoom, createMapRoomClass } from '../dist/adapters/map-
 import { createMemoryEncounterRewardPort } from '../dist/runtime/encounter-reward-worker.js'
 import { createWorldCoordinator } from '../dist/runtime/world-coordinator.js'
 import { movementSmokeData } from './movement-smoke-fixture.mjs'
+import { progressionTestData } from './progression-fixture.mjs'
 
 function joinVersion(data) {
   return {
@@ -67,12 +68,14 @@ export async function joinSmokePeer(baseURL) {
 export async function startBrowserFixtureServer({
   combatScenario = false,
   movementScenario = false,
+  progressionScenario = false,
   traceMovement = false,
   observeReward,
   beforeReward,
 } = {}) {
-  const data = loadGrayboxGameData()
-  const version = joinVersion(data)
+  const original = loadGrayboxGameData()
+  const data = progressionScenario ? progressionTestData() : original
+  const version = joinVersion(original)
   const tiledMaps = combatScenario
     ? data.tiledMaps.map((map) =>
         map.id !== 'm1'
@@ -263,6 +266,10 @@ export async function startBrowserFixtureServer({
     },
     movementAt({ roomId, sessionId }) {
       return movementAt(tracedRooms.get(roomId), matchMaker.getLocalRoomById(roomId)?.clients.getById(sessionId))
+    },
+    progressionAt({ roomId, sessionId }) {
+      const connection = matchMaker.getLocalRoomById(roomId)?.clients.getById(sessionId)
+      if (room?.roomId === roomId && connection) return world.progression(room, connection)
     },
     startMovementTrace({ roomId, sessionId }, startedAt) {
       const connection = matchMaker.getLocalRoomById(roomId)?.clients.getById(sessionId)

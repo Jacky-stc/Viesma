@@ -1,7 +1,7 @@
 import { monsterAttackAtLevel, monsterDefenseAtLevel, monsterMaxHpAtLevel, type GameData, type NormalizedMap } from '@viesma/game-data'
 import type { MonsterSpawnDefinition } from '@viesma/simulation'
 
-export function getMonsterSpawnDefinitions(data: GameData, map: NormalizedMap): MonsterSpawnDefinition[] {
+export function getMonsterSpawnDefinitions(data: GameData, map: NormalizedMap): (MonsterSpawnDefinition & { readonly baseExp: number })[] {
   const manifest = data.world.maps.find(({ id }) => id === map.id)
   if (!manifest) throw new RangeError(`Missing validated map definition for ${map.id}`)
   if (manifest.recommendedLevels === null) return []
@@ -26,6 +26,7 @@ export function getMonsterSpawnDefinitions(data: GameData, map: NormalizedMap): 
       bounds,
       movement: spawn.movement,
       maxHp: Number(monsterMaxHpAtLevel(archetype, spawn.level, data.monsterScaling)),
+      baseExp: archetype.baseExp * spawn.level,
       patrolSpeed: archetype.patrolSpeed,
       chaseSpeed: archetype.chaseSpeed,
       attackReach: archetype.attackReach,

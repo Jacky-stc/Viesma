@@ -7,7 +7,7 @@
 | `schemaVersion` | 初始為 `1`。文件形狀或欄位語意有不相容變更時提高版本。載入器只接受目前版本，舊資料須明確更新。 |
 | `balanceVersion` | 初始為 `mvp-1`，是整份內容的穩定版本標籤。變更已發布的資料或平衡時更新標籤，部署時整份換版。 |
 | `mapContentHash` | 以 UTF-8 編碼的 canonical manifest JSON 計算 SHA-256，表示為 64 碼小寫十六進位字串。包含 tile size、respawn、地圖基本資料、spawn ID、portal、怪物配置摘要及已匯入的正規化地圖。有匯入內容時加入 `tiledMaps` 欄位，空集合沿用 M0.4 的序列化。 |
-| `protocolVersion` | 由 `@viesma/protocol` 定義。M3.4 的地圖交接與重連使用 `4`，M4.2 沿用。Wire contract 有不相容變更時提高版本。 |
+| `protocolVersion` | 由 `@viesma/protocol` 定義。M5.1 的私人進度快照與配置 AP 使用 `5`。Wire contract 有不相容變更時提高版本。 |
 
 Server 和 client 共同使用 `loadGrayboxGameData` 載入隨程式發布的七張 Tiled JSON。Server 以 `serializeMapManifest` 計算入房版本的 hash。M3.1 接入 transport admission，`checkJoinVersion` 對 protocol、balance、map hash 依序精確比對。版本以部署為單位更新。
 
@@ -19,6 +19,7 @@ Server 和 client 共同使用 `loadGrayboxGameData` 載入隨程式發布的七
 - 初始 fixture 描述七圖、六條雙向連線、建議等級與怪物群組。`loadGrayboxGameData` 要求七份 Tiled JSON 都通過 manifest 和幾何驗證，並核對各圖的怪物出生物件數與群組配置。`tiledMaps` 提供碰撞、出生點、傳送觸發區、巡邏／飛行區、NPC、掉落備援點及圖層。 [Tiled 地圖製作指南](TILED_MAPS.md)
 - `loadGrayboxGameData` 也驗證 Guide 設定的穩定 ID、正整數互動半徑和非空白對話，並將其連結到 Village 的正規化 `npc_guide` 點。缺少該點時，發行資料驗證失敗。初始 96 world units 沿用 `mvp-1` 的設計基線。點位隨正規化地圖納入 `mapContentHash`，對話文字與距離設定隨 build 發布。 [Guide 設定](../packages/game-data/src/guide.ts)
 - `progression` 包含等級上限、每級 AP、EXP 係數與按目前等級排列的表。載入器核對 `coefficient × L × (L + 1)`，並算出到頂累計 EXP 及 AP。Fixture 用同一份係數與等級上限產生表。
+- M5.1 授予 EXP 讀取已驗證的 `expToNextLevel`。初始四項屬性、初始 HP／MP 與衍生戰鬥公式集中於 game-data，權威戰鬥與私人 HUD 共用伺服器算出的結果。
 - `monsters` 包含 Slime、Mushroom、Bat 的 Lv1 初值、移動與傷害類型、掉落表和素材。等級縮放以整數基點表示，載入時檢查最高等級的計算結果及 EXP 分配乘積的安全上限。
 - `initialMonsterAiBalance` 啟用 GAME_DESIGN 的 `mvp-1` 目標掃描、aggro／lose-target／leash、失去目標與攻擊時序，以及 M4.4 的 corpse 30 ticks、respawn wait 300 ticks。 `loadMonsterAiBalance` 驗證數值範圍、半徑順序及 cooldown 長度。Spawn director 使用已驗證的 archetype、等級、巡邏區間或飛行區域，按 spawn ID 選取最多 `world.maxMonstersPerMap` 個出生點。
 - `initialPlayerAttackBalance` 集中 M4.2 普攻時序、48 × 40 命中矩形、目標上限、怪物戰鬥中心與暴擊倍率。`getBeginnerCombatStats` 從已驗證的 Training Sword 與 Beginner 初始屬性計算普攻、物防、魔防及暴擊基點。怪物 HP、ATK、DEF 使用同一套載入驗證與出生等級縮放公式。 [戰鬥規則](GAME_DESIGN.md#4-combat)

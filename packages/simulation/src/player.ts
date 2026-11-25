@@ -2,6 +2,7 @@ import {
   toSimulationTick,
   type AttackId,
   type CharacterId,
+  type DerivedCombatStats,
   type MoveX,
   type NonNegativeSafeInteger,
   type Player,
@@ -84,9 +85,13 @@ export function createPlayer(
   characterId: CharacterId,
   position: WorldPoint,
   grounded: boolean,
-  facing: FacingDirection = 'right'
+  facing: FacingDirection = 'right',
+  maxima: Pick<DerivedCombatStats, 'maxHp' | 'maxMp'> = {
+    maxHp: initialPlayerLifecycleBalance.beginnerMaxHp,
+    maxMp: initialPlayerLifecycleBalance.beginnerMaxMp,
+  }
 ): SimulationPlayer {
-  const { beginnerMaxHp: maxHp, beginnerMaxMp: maxMp } = initialPlayerLifecycleBalance
+  const { maxHp, maxMp } = maxima
   return {
     characterId,
     position: { ...position },
@@ -102,6 +107,14 @@ export function createPlayer(
     locomotion: grounded ? 'idle' : 'fall',
     action: { kind: 'none' },
   }
+}
+
+export function clampPlayerVitals(
+  player: SimulationPlayer,
+  { maxHp, maxMp }: Pick<DerivedCombatStats, 'maxHp' | 'maxMp'>
+): SimulationPlayer {
+  const { hp, mp } = player.vitals
+  return { ...player, vitals: { hp: Math.min(hp, maxHp), mp: Math.min(mp, maxMp), maxHp, maxMp } }
 }
 
 export function playerFeet({ position }: SimulationPlayer): WorldPoint {

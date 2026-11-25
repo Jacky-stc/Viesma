@@ -31,6 +31,7 @@ export {
 export { createPlayerController, type PlayerController } from './player-controller.js'
 export { respawnPlayer, type PlayerLifecycleEvent, type PlayerVitalEffect } from './player-lifecycle.js'
 export {
+  clampPlayerVitals,
   createPlayer,
   getPlayerPresentationState,
   neutralMovement,
@@ -46,6 +47,7 @@ export {
   type PlayerVitals,
   type SimulationPlayer,
 } from './player.js'
+export { allocateAttributes, allocateSoloExperience, createCharacterAggregate, grantExperience } from './progression.js'
 export { createSeededRng } from './random.js'
 export type { RandomSource } from './random.js'
 export { createSafeHubSpawn, type SafeHubSpawn } from './safe-hub.js'

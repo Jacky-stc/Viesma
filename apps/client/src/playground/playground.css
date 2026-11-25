@@ -54,6 +54,7 @@ body {
 }
 
 .playground-toolbar :is(button, select),
+.ap-hud-button,
 .playground-help button,
 .playground-guide button,
 .playground-touch button {
@@ -68,6 +69,7 @@ body {
 }
 
 .playground-toolbar :is(button, select):hover,
+.ap-hud-button:hover,
 .playground-help button:hover,
 .playground-guide button:hover {
   background: #28485d;
@@ -250,13 +252,78 @@ body {
 .playground-hud {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.25rem 0.75rem;
   color: #ffcc89;
+}
+
+.ap-panel {
+  width: min(24rem, 90vw);
+}
+
+.ap-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.ap-panel h2 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.ap-stats,
+.ap-attributes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.375rem 1rem;
+}
+
+.ap-stats div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.375rem;
+}
+
+.ap-stats dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.ap-attributes {
+  margin: 0;
+  padding: 0.5rem;
+  border: 0.0625rem solid #527889;
+}
+
+.ap-attributes label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.ap-attributes input {
+  min-width: 0;
+  padding: 0.25rem 0.375rem;
+  font: inherit;
+}
+
+.ap-panel button[type='submit'] {
+  margin-block-start: 0.5rem;
+}
+
+.ap-panel button[aria-disabled='true'] {
+  opacity: 0.55;
+  cursor: default;
 }
 
 @media (any-pointer: coarse) and (orientation: landscape) {
   .playground-touch:not([hidden]) {
     display: flex;
+  }
+
+  .ap-hud-button {
+    display: none;
   }
 
   .playground-guide {

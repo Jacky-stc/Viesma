@@ -1143,3 +1143,129 @@ test('recovers from a real M1 void fall and a delayed destination join on the sa
     await fixture.close()
   }
 })
+
+async function joinProgression(page, fixture) {
+  const currentSeat = await routeFixtureRoom(page, fixture)
+  await page.goto('/?multiplayerDiagnostics=1')
+  await page.getByLabel('場景模式').selectOption('multiplayer')
+  const hud = page.getByLabel('Beginner 狀態')
+  await expect(hud).toContainText('Lv. 1')
+  await expect(hud).toContainText('EXP 0 / 100')
+  const seat = currentSeat()
+  const authority = fixture.progressionAt(seat)
+  await expect(page.locator('.playground-canvas')).toHaveAttribute('data-multiplayer-character-id', authority.characterId)
+  return { seat, hud, authority }
+}
+
+test('shows private progression, waits for authority, and opens the AP panel with keyboard and landscape touch', async ({
+  page,
+  browser,
+  baseURL,
+}) => {
+  const fixture = await startBrowserFixtureServer({ progressionScenario: true })
+  const other = await browser.newPage({ baseURL, viewport: { width: 667, height: 375 }, hasTouch: true, isMobile: true })
+  let ownerSocket
+  let oldSnapshot
+  let confirmation
+  let holdConfirmation = true
+  const observerPackets = []
+  try {
+    await page.routeWebSocket(
+      ({ host }) => host === fixture.address,
+      (socket) => {
+        ownerSocket = socket
+        const server = socket.connectToServer()
+        server.onMessage((message) => {
+          if (Buffer.isBuffer(message) && message.includes('OwnerProgression')) {
+            oldSnapshot ??= message
+            if (holdConfirmation && message.includes('CONFIRMED')) {
+              confirmation = message
+              return
+            }
+          }
+          socket.send(message)
+        })
+      }
+    )
+    await other.routeWebSocket(
+      ({ host }) => host === fixture.address,
+      (socket) => {
+        const server = socket.connectToServer()
+        server.onMessage((message) => {
+          if (Buffer.isBuffer(message) && message.includes('OwnerProgression')) observerPackets.push(message)
+          socket.send(message)
+        })
+      }
+    )
+    const owner = await joinProgression(page, fixture)
+    const observer = await joinProgression(other, fixture)
+    expect(owner.seat.roomId).toBe(observer.seat.roomId)
+    expect(owner.authority.characterId).not.toBe(observer.authority.characterId)
+
+    await other.getByRole('button', { name: '能力點數', exact: true }).tap()
+    await expect(other.getByRole('dialog', { name: '能力點數' })).toContainText('可用 AP 0')
+    await other.getByRole('button', { name: '關閉' }).tap()
+    const surface = page.getByLabel('平台測試場')
+    await surface.focus()
+    await page.keyboard.press('j')
+    await expect(owner.hud).toContainText('Lv. 2')
+    await expect(owner.hud).toContainText('EXP 0 / 300')
+    await expect(owner.hud).toContainText('HP 50 / 60')
+    await expect(observer.hud).toContainText('Lv. 1')
+    expect(fixture.progressionAt(observer.seat)).toMatchObject({
+      characterId: observer.authority.characterId,
+      level: 1,
+      characterVersion: 0,
+    })
+
+    await page.keyboard.press('k')
+    const panel = page.getByRole('dialog', { name: '能力點數' })
+    await expect(panel).toContainText('可用 AP 5')
+    const stat = (name) => panel.getByText(name, { exact: true }).locator('..').locator('dd')
+    await expect(stat('攻擊力')).toHaveText('21')
+    const str = panel.getByRole('spinbutton', { name: 'STR 配置' })
+    const dex = panel.getByRole('spinbutton', { name: 'DEX 配置' })
+    const allocate = panel.getByRole('button', { name: '配置 AP' })
+    await str.fill('6')
+    await allocate.click()
+    await expect(panel.getByRole('status')).toHaveText('可用 AP 不足')
+    await expect(panel).toContainText('可用 AP 5')
+
+    await str.fill('1')
+    await dex.fill('4')
+    await allocate.click()
+    await expect(panel.getByRole('status')).toHaveText('等待伺服器確認…')
+    await expect(stat('攻擊力')).toHaveText('21')
+    await expect.poll(() => Boolean(confirmation)).toBe(true)
+    expect(fixture.progressionAt(owner.seat)).toMatchObject({
+      characterId: owner.authority.characterId,
+      characterVersion: 2,
+      unspentAp: 0,
+      baseAttributes: { str: 5, dex: 8 },
+      stats: { maxHp: 65, attackPower: 25, physicalDefense: 2 },
+    })
+    holdConfirmation = false
+    ownerSocket.send(confirmation)
+    await expect(panel.getByRole('status')).toHaveText('能力點數已配置')
+    await expect(stat('攻擊力')).toHaveText('25')
+    await expect(stat('物理防禦')).toHaveText('2')
+    await expect(panel.getByText('STR 5')).toBeVisible()
+    await expect(owner.hud).toContainText('HP 50 / 65')
+
+    ownerSocket.send(oldSnapshot)
+    await str.fill('1')
+    await allocate.click()
+    await expect(panel.getByRole('status')).toHaveText('可用 AP 不足')
+    await expect(stat('攻擊力')).toHaveText('25')
+    await expect(owner.hud).toContainText('Lv. 2')
+    await expect(observer.hud).toContainText('HP 50 / 50')
+    expect(observerPackets.length).toBeGreaterThan(0)
+    expect(observerPackets.every((message) => message.includes(observer.authority.characterId))).toBe(true)
+    expect(observerPackets.some((message) => message.includes(owner.authority.characterId))).toBe(false)
+    await page.keyboard.press('k')
+    await expect(panel).toBeHidden()
+  } finally {
+    await other.close()
+    await fixture.close()
+  }
+})

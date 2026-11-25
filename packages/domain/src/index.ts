@@ -1,4 +1,5 @@
 export type { Attack, Contribution, MapState, Monster, Player } from './models.js'
+export { attributeNames, type Attributes, type CharacterAggregate, type DerivedCombatStats } from './progression.js'
 export type {
   Character,
   CharacterRepository,

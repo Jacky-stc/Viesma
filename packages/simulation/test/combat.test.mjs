@@ -1,5 +1,7 @@
 import {
+  deriveCombatStats,
   getBeginnerCombatStats,
+  getStarterWeaponModifiers,
   initialPhysicsBalance,
   loadGrayboxGameData,
   monsterAttackAtLevel,
@@ -8,12 +10,15 @@ import {
 import { positionQuantum } from '@viesma/physics'
 import { expect, test } from 'vitest'
 import {
+  allocateAttributes,
+  createCharacterAggregate,
   createMonsterMovement,
   createPlayer,
   createPlayerController,
   createSeededRng,
   createSolidObstructionTest,
   fixedDeltaSeconds,
+  grantExperience,
   spawnMonsters,
   step,
 } from '../src/index.ts'
@@ -295,6 +300,32 @@ test.each([
   expect(h.until(29)).toEqual([])
   expect(h.advance()).toEqual([])
   expect(h.monsters[0].behavior).toMatchObject({ kind: 'attack', startedAt: 30, action: { phase: 'windup' } })
+})
+
+test('resolves updated attack power and both defenses for the affected character only', () => {
+  const owner = createCharacterAggregate('player-a')
+  const { character } = allocateAttributes(grantExperience(owner, 400, data.progression), { str: 4, dex: 4, int: 2, luk: 0 })
+  const updated = deriveCombatStats(character.level, character.baseAttributes, getStarterWeaponModifiers(data))
+  const stats = (characterId) => (characterId === owner.characterId ? updated : playerStats)
+  const outgoing = harness({ monsters: [monster('slime', 1035)], stats, rng: { nextUnit: () => 0.8 } })
+  outgoing.advance([input(1)])
+  expect(outgoing.until(5)).toMatchObject([{ kind: 'monsterDamaged', damage: 30 }])
+
+  for (const [archetypeId, ownerDamage, otherDamage] of [
+    ['slime', 4, 5],
+    ['bat', 5, 6],
+  ]) {
+    const other = { characterId: 'player-b', lifeStartedTick: 0 }
+    const incoming = harness({
+      players: [player(), player(other.characterId, 1100)],
+      monsters: [monster('first', 1020, { archetypeId, target: targetA }), monster('second', 1120, { archetypeId, target: other })],
+      stats,
+    })
+    expect(incoming.until(9)).toMatchObject([
+      { kind: 'playerDamaged', characterId: owner.characterId, damage: ownerDamage },
+      { kind: 'playerDamaged', characterId: other.characterId, damage: otherDamage },
+    ])
+  }
 })
 
 test('monster damage floors at one, respects walls and uses real range rather than a target supplied by input', () => {

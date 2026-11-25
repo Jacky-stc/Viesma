@@ -6,7 +6,15 @@ export type { GuideDefinition } from './guide.js'
 export { initialPhysicsBalance, loadPlayerMovementBalance, type PlayerMovementBalance } from './initial-physics.js'
 export { loadGameData } from './load.js'
 export { initialMonsterAiBalance, loadMonsterAiBalance } from './monster-ai.js'
-export { getBeginnerCombatStats, initialPlayerAttackBalance, maxBasisPoints, type PlayerCombatStats } from './player-combat.js'
+export {
+  deriveCombatStats,
+  getBeginnerCombatStats,
+  getStarterWeaponModifiers,
+  initialBaseAttributes,
+  initialPlayerAttackBalance,
+  maxBasisPoints,
+  type PlayerCombatStats,
+} from './player-combat.js'
 export {
   initialPlayerLifecycleBalance,
   loadPlayerLifecycleBalance,

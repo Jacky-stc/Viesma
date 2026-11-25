@@ -15,7 +15,7 @@ import { playerCenter, playerFeet, type SimulationPlayer } from './player.js'
 import type { RandomSource } from './random.js'
 
 export interface CombatStepContext extends Pick<EncounterHitContext, 'participant' | 'balanceVersion'> {
-  readonly playerStats: PlayerCombatStats
+  readonly playerStats: PlayerCombatStats | ((characterId: CharacterId) => PlayerCombatStats)
   readonly isObstructed: SolidObstructionTest
   readonly admitAttacks?: boolean
 }
@@ -83,11 +83,12 @@ function resolvePlayerHits(
   )
 
   const resolved = new Set<AttackId>()
-  const { attackPower, criticalChanceBps } = context.playerStats
+  const { playerStats } = context
   for (const { player, swing, facing } of swings) {
     if (resolved.has(swing.attackId)) continue
     resolved.add(swing.attackId)
 
+    const { attackPower, criticalChanceBps } = typeof playerStats === 'function' ? playerStats(player.characterId) : playerStats
     const center = playerCenter(player)
     let hitCount = 0
     for (const [index, monster] of monsters.entries()) {
@@ -159,7 +160,8 @@ function resolveMonsterHits(
     if (!monsterCanReach(monster, playerFeet(player)) || context.isObstructed(monsterCenter(monster), playerCenter(player))) continue
 
     const { characterId } = player
-    const { physicalDefense, magicDefense } = context.playerStats
+    const { playerStats } = context
+    const { physicalDefense, magicDefense } = typeof playerStats === 'function' ? playerStats(characterId) : playerStats
     const damage = Math.max(1, spawn.attack - (spawn.damageType === 'physical' ? physicalDefense : magicDefense))
     const damaged = applyPlayerVitalEffects(player, [{ kind: 'damage', amount: damage }], tick)
     const effectiveDamage = player.vitals.hp - damaged.vitals.hp

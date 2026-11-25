@@ -1,5 +1,5 @@
-import type { AttackId, CharacterId, EncounterId, MapInstanceId, MonsterId, SimulationTick } from '@viesma/domain'
-import type { NormalizedMap, PlayerCombatStats } from '@viesma/game-data'
+import type { AttackId, CharacterId, DerivedCombatStats, EncounterId, MapInstanceId, MonsterId, SimulationTick } from '@viesma/domain'
+import type { NormalizedMap } from '@viesma/game-data'
 import {
   maxCombatDamageAgeTicks,
   maxCombatDamageEvents,
@@ -12,6 +12,7 @@ import {
   type PublicMapRoom,
 } from '@viesma/protocol'
 import {
+  clampPlayerVitals,
   createMonsterMovement,
   createPlayer,
   createPlayerController,
@@ -84,7 +85,7 @@ function expireQueuedInputs(pending: QueuedFrame[], nowMilliseconds: number, ser
 }
 
 interface MapCombatOptions {
-  readonly playerStats: PlayerCombatStats
+  readonly playerStats: (characterId: CharacterId) => DerivedCombatStats
   readonly balanceVersion: string
   readonly rewards: EncounterRewardWorker
   readonly partyMembership?: (characterId: CharacterId) => PartyMembership | undefined
@@ -258,6 +259,10 @@ export function createMapRuntime(
         return { characterId, connectionEpoch, mapEpoch }
       }
     },
+    updatePlayerMaxima(characterId: CharacterId, stats: DerivedCombatStats): void {
+      const body = player(characterId)
+      if (body) putPlayer(clampPlayerVitals(body, stats))
+    },
     freeze(connection: object): void {
       const seat = bindings.get(connection)
       if (!seat) return
@@ -384,7 +389,9 @@ export function createMapRuntime(
       // 僅在 tick 邊界建立與移除 body。step 依 characterId 排序角色並套用輸入。
       for (const actor of seats.values()) {
         const { characterId } = actor
-        const player = currentPlayers.get(characterId) ?? createPlayer(characterId, spawn.position, true, spawn.facing)
+        const player =
+          currentPlayers.get(characterId) ??
+          createPlayer(characterId, spawn.position, true, spawn.facing, combatOptions?.playerStats(characterId))
         if (actor.frozen) {
           frozen.push(player)
           continue

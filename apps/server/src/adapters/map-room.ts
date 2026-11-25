@@ -1,6 +1,7 @@
 import { ClientState, CloseCode, ErrorCode, getMessageBytes, matchMaker, Protocol, Room, ServerError, type Client } from '@colyseus/core'
 import { MapRoomSchema, updateMapRoomSchema, type MapRoomState } from '@viesma/network-colyseus'
 import {
+  allocateApMessage,
   cancelTransferMessage,
   checkJoinVersion,
   combatDamageMessage,
@@ -9,6 +10,7 @@ import {
   mapRoomJoinedMessage,
   mapRoomName,
   movementCheckpointMessage,
+  ownerProgressionMessage,
   parseMapAdmission,
   parseTransferCancellation,
   transferFailureMessage,
@@ -38,6 +40,7 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
     seatReservationTimeout = reservationSeconds
     #runtime: MapRuntime | undefined
     #combatReady = new WeakSet<Client>()
+    #progressionVersion = new WeakMap<Client, number>()
 
     onCreate(): void {
       const runtime = world.createRoom(mapId, this.roomId)
@@ -51,6 +54,9 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
       })
       this.onMessage(interactPortalMessage, (client, payload: unknown) => {
         world.requestPortal(runtime, client, payload)
+      })
+      this.onMessage(allocateApMessage, (client, payload: unknown) => {
+        if (this.clients.getById(client.sessionId) === client) world.requestAp(runtime, client, payload)
       })
       this.onMessage(cancelTransferMessage, (client, payload: unknown) => {
         const ticket = parseTransferCancellation(payload)
@@ -74,6 +80,10 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
         joined: (binding) => sendCredential(client, mapRoomJoinedMessage, binding),
         offer: (offer) => sendCredential(client, transferOfferMessage, offer),
         failed: (failure) => client.send(transferFailureMessage, failure),
+        progression: (snapshot) => {
+          client.send(ownerProgressionMessage, snapshot)
+          this.#progressionVersion.set(client, snapshot.characterVersion)
+        },
         close: () => {
           if (this.clients.getById(client.sessionId) === client) this.kickClient(client.sessionId)
         },
@@ -121,6 +131,11 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
         const checkpoint = world.checkpoint(runtime, client)
         if (!checkpoint) continue
         client.send(movementCheckpointMessage, checkpoint, { afterNextPatch: true })
+        const progression = world.progression(runtime, client, this.#progressionVersion.get(client))
+        if (progression) {
+          client.send(ownerProgressionMessage, progression, { afterNextPatch: true })
+          this.#progressionVersion.set(client, progression.characterVersion)
+        }
         if (combatDamage && this.#combatReady.has(client)) {
           client.send(combatDamageMessage, combatDamage, { afterNextPatch: true })
         }
