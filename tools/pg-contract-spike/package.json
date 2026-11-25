@@ -1,0 +1,9 @@
+{
+  "name": "viesma-pg-contract-spike",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "dependencies": {
+    "pg": "8.23.1"
+  }
+}

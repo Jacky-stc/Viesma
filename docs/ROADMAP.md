@@ -1,6 +1,6 @@
 # 開發路線圖
 
-規格基線為 Task 0（2026-11-23）。正式任務由 45 項增為 46 項，新增 M5.6。目前 `DONE` 25 項（25／46，54.35%）、`LOCAL_VERIFIED` 1 項、`NOT_STARTED` 20 項、`IN_PROGRESS`／`BLOCKED` 各 0 項。進度以 `DONE` 除以正式任務總數計算，排除本次文件整理與五項風險檢查。 [協作規則](../AGENTS.md) · [驗證證據索引](evidence/README.md)
+規格基線為 Task 0（2026-11-23）。正式任務由 45 項增為 46 項，新增 M5.6。目前 `DONE` 27 項（27／46，58.70%）、`NOT_STARTED` 19 項、`LOCAL_VERIFIED`／`IN_PROGRESS`／`BLOCKED` 各 0 項。進度以 `DONE` 除以正式任務總數計算，排除本次文件整理與五項風險檢查。 [協作規則](../AGENTS.md) · [驗證證據索引](evidence/README.md)
 
 ## 1. 交付策略與 dependency graph
 
@@ -85,7 +85,7 @@ flowchart TD
 
 M5.1（`DONE`）→ 路線圖整理 → 啟動第一輪行動實機 smoke，與 M5.2 並行 → M5.2 → M5.3 → PostgreSQL 契約 spike → M5.4 → M5.5 → 容量 spike → 早期單人 playtest 與第二輪行動實機 smoke → M5.6 NPC 商店 → M6 → M7 → M8。
 
-此順序安排交付與風險檢查，正式任務的技術依賴由圖與各任務定義。以下五項檢查均待執行，將結果附到 [M5 證據](evidence/M5.md)，保留 M6.5、M7、M8 的正式驗收。
+此順序安排交付與風險檢查，正式任務的技術依賴由圖與各任務定義。風險檢查結果收錄於 [證據索引](evidence/README.md)，保留 M6.5、M7、M8 的正式驗收。
 
 ### 第一輪行動實機 smoke（M5.1 後）
 
@@ -94,6 +94,7 @@ M5.1（`DONE`）→ 路線圖整理 → 啟動第一輪行動實機 smoke，與 
 
 ### PostgreSQL 契約 spike（M5.3 後）
 
+- **結論**。`PROCEED_TO_M5.4`。真 PostgreSQL 18.7 已驗證角色鎖、滿包交換、同鍵收據與 COMMIT 恢復。非同步 tick 接合與文字相容性的 M7 待辦見 [PostgreSQL 契約 spike 證據](evidence/PG-CONTRACT-SPIKE.md)。此檢查不計入 46 項正式任務。
 - 限一個專注開發時段。使用可拋棄的真 PostgreSQL 與最小測試表，沿用 InventoryRepository 與角色 mutation 邊界，比對 memory／PG 選定操作的結果。以並行 equip、swap 或其他代表性 inventory mutations 施壓，M5.4 pickup 可稍後交付。
 - 以實際 transaction／獨立連線驗證 bag／equipment 原子更新、row lock、version check、unique constraints、同鍵重送／異 payload 拒絕、rollback，以及 COMMIT 結果不明時以 receipt 查回原結果。交付短報告，列出重現步驟、結果、限制與待修正契約。測試 adapter 與 schema 限於隔離環境。正式 schema／migration、runtime PG 接入、帳號／登入與 durable rewards 由 M7 交付。
 
@@ -101,6 +102,7 @@ M5.1（`DONE`）→ 路線圖整理 → 啟動第一輪行動實機 smoke，與 
 
 - 工具實作限一個專注開發時段。以真 Colyseus headless clients 接上正式 server 的 WorldCoordinator，逐階量測 1 房 20 人、3 房 60 人、7 房 140 人。每個可支援階段以固定條件跑 10 分鐘，包含移動、戰鬥、獎勵生成與代表性 WebSocket 流量。記錄未能啟動或跑完的階段及原因。
 - 記錄全域 world tick 執行時間 p50／p95／p99／max、各房 tick 成本、event-loop delay、積欠與補跑、CPU／RSS／heap 趨勢、GC pause、WebSocket 上下行、input／reward queue 深度與拒絕／到期／重試，以及 admission、transfer、reconnect 結果。以 tick p95 <20 ms、p99 <33.33 ms 作早期比較。
+- 記錄角色 receipt 筆數、每階段新增／重送率、角色釋放前後的保留量及 heap 趨勢。 [收據成長證據](evidence/PG-CONTRACT-SPIKE.md#收據成長與容量-spike)
 - 報告附硬體、build／程序配置、client workload、怪物數與量測限制。使用 memory repository 得到短期單節點觀察，正式容量由 [M8.3 的 60 分鐘驗收](#m83--loadcapacity-與-balance-tuning) 決定。Redis、worker threads、distributed simulation 或 multi-node 的提案須有量測依據及另外授權。
 
 ### 單人 playtest（M5.5 後）
@@ -421,7 +423,7 @@ M5.1（`DONE`）→ 路線圖整理 → 啟動第一輪行動實機 smoke，與 
 - **Deliverables**：inventory services／ports、atomic memory mutations、inventory／item detail UI。
 - **Acceptance criteria**：24-slot 不溢位；滿包 equip 可用來源 slot 交換，滿包 unequip 拒絕；同物品不複製到兩 location。
 - **Required tests**：full bag／stack overflow／multi-stack atomicity、wrong owner／slot type、same request 不同 payload、concurrent equip／AP／pickup、rollback 不留半成品。
-- **Status**：LOCAL_VERIFIED · [Evidence](evidence/M5.md#m53)
+- **Status**：DONE · [Evidence](evidence/M5.md#m53)
 
 ### M5.4 — Ground pickup、consumables 與 owner-only view
 
@@ -514,6 +516,8 @@ M5.1（`DONE`）→ 路線圖整理 → 啟動第一輪行動實機 smoke，與 
 - **Status**：NOT_STARTED
 
 ## 9. M7 — Persistence & Character Management（6 tasks）
+
+[PostgreSQL 契約 spike](evidence/PG-CONTRACT-SPIKE.md#契約差異與-m7-決策) 留下 M7.1 的槽位與文字欄位選型、M7.3 的 durable receipt 身分，以及 M7.4 的非同步套用與恢復案例。
 
 ### M7.1 — PostgreSQL schema、Drizzle 與 migrations
 
