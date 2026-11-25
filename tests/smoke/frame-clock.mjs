@@ -4,6 +4,8 @@ export async function installFrameClock(page) {
     let id = 0
     let tick = 0
     const now = globalThis.performance.now() + 0.01
+    const requestBrowserFrame = globalThis.requestAnimationFrame.bind(globalThis)
+    globalThis.waitForBrowserFrame = () => new Promise((resolve) => requestBrowserFrame(() => resolve()))
     globalThis.requestAnimationFrame = (callback) => {
       queue.set(++id, callback)
       return id
@@ -24,4 +26,8 @@ export async function installFrameClock(page) {
     }
   })
   return (ticks) => page.evaluate((ticks) => globalThis.drawWorld(ticks), ticks)
+}
+
+export function waitForBrowserFrame(page) {
+  return page.evaluate(() => globalThis.waitForBrowserFrame())
 }

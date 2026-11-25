@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { installFrameClock } from './frame-clock.mjs'
+import { installFrameClock, waitForBrowserFrame } from './frame-clock.mjs'
 
 const hud = (page) => page.getByLabel('Beginner 狀態')
 const scene = (page) => page.getByRole('region', { name: '平台測試場' })
@@ -268,6 +268,8 @@ test.describe('667 × 375 landscape touch input', () => {
     await page.setViewportSize({ width: 375, height: 667 })
     await expect(page.getByText('請將裝置轉為橫向以操作。')).toBeVisible()
     await expect(group).toBeHidden()
+    // 瀏覽器會在原生影格回呼前送出媒體查詢的 change 事件。
+    await waitForBrowserFrame(page)
     await draw(4)
     await expect(hud(page)).toContainText('待機 · 朝右')
     await touch('touchEnd')
@@ -275,6 +277,7 @@ test.describe('667 × 375 landscape touch input', () => {
     await page.setViewportSize(resized)
     await expect(group).toBeVisible()
     await expect(page.getByText('請將裝置轉為橫向以操作。')).toBeHidden()
+    await waitForBrowserFrame(page)
     expect(await originalCanvas.evaluate((element) => element.isConnected)).toBe(true)
     await touch('touchStart', [await point('向左', 5, resized)])
     await draw(2)

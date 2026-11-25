@@ -138,6 +138,7 @@ flowchart LR
 - **Status**：DONE
 - **驗證紀錄（2026-11-23）**。Windows 使用 Node.js 24.22.3／pnpm 11.19.0。`typecheck`、`lint`、`format:check`、`check:boundaries`、135 項 Vitest、production build 和 7 項 Chromium smoke 均通過。測試包含 30 Hz 取樣與序號、鍵盤焦點與輸入欄、多指移動加跳躍或攻擊，以及中斷後回到中立。原有腳本重播與 simulation golden traces 通過。
 - **人工驗證**。使用有視窗的 Chromium 159.0.8154.6 和 Chromium 觸控模擬，在 667 × 375 橫向確認操作區與 `pointercancel`，在 375 × 667 直向確認旋轉提示與輸入清理，並回到 640 × 360 橫向確認版面、按鈕恢復及擷取中斷後停止移動。行動實機矩陣由 M8.2 驗證。操作與模式見 [README](../README.md#平台測試場操作)。
+- **CI 迴歸（2026-11-25）**。觸控 smoke 在直橫向切換後等待原生動畫幀，讓瀏覽器先送出清除舊輸入的媒體查詢事件，再推進測試中的固定步進或開始新的觸控。Windows 對 Chromium 159.0.8154.6 執行完整 smoke，21 項均通過。GitHub Actions 的 Ubuntu 驗證待執行。
 
 ### M1.5 — HP／MP、Death 與安全區 respawn fixture
 
