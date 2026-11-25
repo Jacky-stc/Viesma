@@ -1,6 +1,6 @@
 # 系統架構與實作契約
 
-版本：Task 0 / 2026-11-23。本文定義可逐步交付的單節點架構，不代表已建立程式或安裝依賴。規則見 [GAME_DESIGN](GAME_DESIGN.md)，產品驗收見 [PRD](PRD.md)，取捨見 [ADRs](decisions/001-pixijs-over-phaser.md)。
+架構以 Task 0（2026-11-23）為基線，於 2026-11-25 補充商店交易與 PostgreSQL 契約檢查。規則見 [GAME_DESIGN](GAME_DESIGN.md)，產品驗收見 [PRD](PRD.md)，實作進度見 [ROADMAP](ROADMAP.md)，取捨見 [ADRs](decisions/001-pixijs-over-phaser.md)。
 
 ## 1. 架構總覽
 
@@ -99,17 +99,17 @@ M0.2 建立 `domain`、`physics`、`simulation`、`protocol` 與 `network-colyse
 
 ## 3. Ownership matrix
 
-| 狀態／行為 | 唯一權威與生命週期 | Client 工作 |
-| --- | --- | --- |
-| Player movement／collision／HP／MP | MapSimulation；session active 期間由所在 room 持有 | 同 physics 做本機 movement prediction，接受 correction |
-| Monster AI／HP／spawn／death | MapSimulation 單一 writer；room-local，不持久化 | 插值顯示，不執行權威 AI |
-| Combat validation／damage contribution | Server combat step；encounter-local ledger | 送 attack input，播放已確認結果 |
-| Party membership／leader／invite | Process-global PartyService，獨立於 map | UI／command；map transition 不重建 party |
-| Eligibility／group pool／EXP／loot roll | Server reward snapshot＋pure policy＋reward worker | 只顯示 owner 的結果 |
-| Level／AP／base attributes／currency | M5.1 成長由 WorldCoordinator 持有。後續 economy 由 CharacterCoordinator 排序，MVP-B commit 後的 PostgreSQL 為 durable truth | 用 private snapshot 顯示，送意圖 |
-| Bag／equipment／pickup／consume | CharacterCoordinator＋InventoryRepository transaction | 不能樂觀修改已確認 inventory |
-| Persistent character record | PostgreSQL；只有 repository adapter 寫入 | HTTP selection 或 owner-only snapshot |
-| Camera／animation／touch／HUD | Client | 不影響 collision 或 economy |
+| 狀態／行為                                | 唯一權威與生命週期                                                                                                          | Client 工作                                            |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Player movement／collision／HP／MP        | MapSimulation；session active 期間由所在 room 持有                                                                          | 同 physics 做本機 movement prediction，接受 correction |
+| Monster AI／HP／spawn／death              | MapSimulation 單一 writer；room-local，不持久化                                                                             | 插值顯示，不執行權威 AI                                |
+| Combat validation／damage contribution    | Server combat step；encounter-local ledger                                                                                  | 送 attack input，播放已確認結果                        |
+| Party membership／leader／invite          | Process-global PartyService，獨立於 map                                                                                     | UI／command；map transition 不重建 party               |
+| Eligibility／group pool／EXP／loot roll   | Server reward snapshot＋pure policy＋reward worker                                                                          | 只顯示 owner 的結果                                    |
+| Level／AP／base attributes／currency      | M5.1 成長由 WorldCoordinator 持有。後續 economy 由 CharacterCoordinator 排序，MVP-B commit 後的 PostgreSQL 為 durable truth | 用 private snapshot 顯示，送意圖                       |
+| Bag／equipment／pickup／consume／purchase | CharacterCoordinator＋InventoryRepository transaction                                                                       | 不能樂觀修改已確認 inventory 或餘額                    |
+| Persistent character record               | PostgreSQL；只有 repository adapter 寫入                                                                                    | HTTP selection 或 owner-only snapshot                  |
+| Camera／animation／touch／HUD             | Client                                                                                                                      | 不影響 collision 或 economy                            |
 
 每角色有一個 process-wide CharacterActor，map room 只持有其當前 simulation body；不能在 room 轉移時複製 aggregate。Persistent version 與 runtime movement version 分開，不能用一份過期 character snapshot overwrite 新 wallet／inventory。
 
@@ -188,14 +188,15 @@ Client 以同樣30Hz跑 local physics，render 以 `requestAnimationFrame` 自�
 
 ### 5.1 Client → server
 
-| Message | Payload 核心欄位 | 處理契約 |
-| --- | --- | --- |
-| `InputFrame` | `protocolVersion, connectionEpoch, mapEpoch, seq, moveX, jumpPressed, attackPressed` | 30Hz；moveX 僅 -1／0／1，jump／attack 為單次 edge；不接收 damage／EXP／absolute position |
-| `InteractPortal`／`InteractNpc` | `requestId, mapEpoch, objectId` | Portal 由 Up 按下邊緣發起，server 驗證來源交疊後解析目的地。NPC 由互動按鍵發起。 |
-| `PickupLoot` | `requestId, sessionEpoch, mapEpoch, lootId` | 重新驗證 owner、距離、expiry、容量 |
-| `AllocateAP` | `protocolVersion, requestId, connectionEpoch, mapEpoch, expectedCharacterVersion, deltas` | 由目前 socket 綁定辨識本人，驗證角色狀態、版本與整數增量 |
-| `EquipItem`／`UnequipItem`／`ConsumeItem` | `requestId, sessionEpoch, itemInstanceId/slot, expectedCharacterVersion` | version stale 回傳最新 snapshot，不能套用 client bag |
-| `PartyCommand` | `requestId, type, targetId/inviteId, expectedPartyRevision` | PartyService 序列處理；不信任 client roster |
+| Message                                   | Payload 核心欄位                                                                                                                   | 處理契約                                                                                 |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `InputFrame`                              | `protocolVersion, connectionEpoch, mapEpoch, seq, moveX, jumpPressed, attackPressed`                                               | 30Hz；moveX 僅 -1／0／1，jump／attack 為單次 edge；不接收 damage／EXP／absolute position |
+| `InteractPortal`／`InteractNpc`           | `requestId, mapEpoch, objectId`                                                                                                    | Portal 由 Up 按下邊緣發起，server 驗證來源交疊後解析目的地。NPC 由互動按鍵發起。         |
+| `PickupLoot`                              | `requestId, sessionEpoch, mapEpoch, lootId`                                                                                        | 重新驗證 owner、距離、expiry、容量                                                       |
+| `AllocateAP`                              | `protocolVersion, requestId, connectionEpoch, mapEpoch, expectedCharacterVersion, deltas`                                          | 由目前 socket 綁定辨識本人，驗證角色狀態、版本與整數增量                                 |
+| `EquipItem`／`UnequipItem`／`ConsumeItem` | `requestId, sessionEpoch, itemInstanceId/slot, expectedCharacterVersion`                                                           | version stale 回傳最新 snapshot，不能套用 client bag                                     |
+| `PurchaseItem`（M5.6）                    | `protocolVersion, requestId, sessionEpoch, connectionEpoch, mapEpoch, npcId, itemDefinitionId, quantity, expectedCharacterVersion` | 以 socket 與 session 辨識本人，依權威位置及店點驗證互動，查 server 商品目錄計價          |
+| `PartyCommand`                            | `requestId, type, targetId/inviteId, expectedPartyRevision`                                                                        | PartyService 序列處理；不信任 client roster                                              |
 
 入房先驗證版本與連線資格。M3.4 的 `InteractPortal` 使用表列的三個欄位，由已驗證的實際 socket 綁定角色及連線世代。每綁定使用單調遞增的安全整數 `requestId`，同時最多一個待處理請求。後續經濟與隊伍 mutation envelope 帶 `protocolVersion` 和 `connectionEpoch`，並驗證 schema、大小、數值與速率。
 
@@ -211,6 +212,7 @@ Input seq 在 connection epoch 內單調遞增。Server 拒絕舊 epoch、已見
 - **Self movement checkpoint，10 Hz owner-only**。`MovementCheckpoint` 在同 tick 的 public patch 之後由 server 專門發給本人，帶版本、角色、map instance、connection／map epoch、生命開始 tick 及 server tick。`ackInputSeq` 是累積結案邊界，初值為 `null`，在權威步進完成後才更新。它涵蓋已套用、衝突、過期、淘汰或滿隊拒收的幀，以及較新序號關閉的缺口。ACK 不跨過最早未決幀，佇列清空後涵蓋已結案的尾端。控制器自己的 `lastProcessedInputSeq` 和 `lastInputTick` 則記錄實際套用的輸入。完整狀態包含 position、velocity、grounded／void、水平意圖、jump buffer／coyote、facing、locomotion、action 及最近受擊 tick。HP／MaxHP 沿用公開投影。
 - **Reliable visual messages**：attack／damage／death／respawn event，含 eventId 與 tick；純顯示事件可在 reconnect 丟棄，不重播舊 damage numbers。EventId 做短期去重。
 - **Owner-only messages**：character／bag／equipment snapshot、loot snapshot／delta、request result、reward receipt。`privateRevision` 不連續時重新要求完整 snapshot；重新入房／重連一定重建完整 owner view。
+- **購買結果（M5.6）**。只有本人收到帶 requestId 的 pending／拒絕／已提交結果。成功後用同一角色版本回報餘額與 bag 更新，換圖或重連由完整 owner view 恢復。
 - **M5.1（protocol 5）**。`OwnerProgression` 綁定 `characterId`、`connectionEpoch` 與 `mapEpoch`，在入房／重連及角色版本變更時傳送全量進度，可附 AP 請求的結案碼。較舊版本的快照不得覆寫已確認資料。
 - **Party-only messages**：PartyService 對所有 connected members 發送 revisioned full snapshot，包含同／跨 map 的 member 摘要。不同 party 收不到 invite／roster 私有資料。
 
@@ -286,6 +288,8 @@ DB 暫不可用時 bounded retry 同一 intent，保留結算中狀態，economy
 
 ## 8. Persistence model 與 transaction boundaries
 
+M5.3 後的 [PostgreSQL 契約 spike](ROADMAP.md#postgresql-契約-spikem53-後) 使用可拋棄的真資料庫試驗既有 InventoryRepository 及 transaction 語意。正式 schema、Drizzle migrations 與 adapters 自 M7.1 交付。M7.1 依賴 M6.4 定義的 frozen death snapshot、多人 grants／receipts 及 personal ground grants，以便驗證正式資料約束與 parity。
+
 ### 8.1 初始 logical schema
 
 | Table | 關鍵資料／constraints |
@@ -315,10 +319,13 @@ Request 處理先驗證 session／connection 與 payload hash，再查相同 ide
 | Equip／unequip | lock character／items；validate current version、type／level、target capacity；變更 locations＋receipt | commit 後 derived stats 重算與 clamp |
 | AP | lock character；驗證整數、remaining AP、invariant；更新四屬性＋AP＋receipt | commit 後 derived stats 重算與 clamp |
 | Consume | lock character／item；admission 驗證 alive、未滿並保留 cooldown；扣量＋記錄一次性 heal effect receipt | commit 後下一 tick apply effect；若已死亡則 effect 已處理但不恢復、不退款；失敗 rollback 釋放保留 |
+| Purchase（M5.6 memory／M7.4 PG） | 經 CharacterCoordinator 序列化，鎖 character／相關 bag rows，重驗 version、ownership、餘額及完整容量；用 server 固定價原子扣 purse、入包及寫 command receipt | commit 後於 tick 邊界套用已確認版本與本人更新。重送或 COMMIT 結果不明時查 receipt，換圖／重連沿用同一份 aggregate |
 | Create character | lock account 保護3角色上限；insert character＋starter bag／equipment 原子建立 | 完成才可 selection |
 | Loot expire／rebind | lock loot；確認 GROUND、server wall time、原 instance 是否不存在、owner active instance | 只更新可見性；expiry 不延長，不 reroll |
 
 Gameplay actor facts（alive、map、距離、cooldown）在 command acceptance 的 authority turn 線性化，DB rows 的 owner／quantity／version／expiry 在 transaction 中再次驗證。已接受且成功 commit 的經濟 command 不因後續移動／斷線撤銷；新的 command 在 Death／transfer 中拒絕。Consume 在 accepted 時保留 shared potion cooldown 與 pending request，避免多次同時使用；DB rollback 解除保留。若角色在 commit 前已死亡，該藥水仍已消耗但不產生 heal／復活；UI 顯示該確定結果。Effect 只在原 session 的當前 body apply 一次；新 session／重啟以 Village 滿血重建，不 replay 舊 heal。
+
+購買接收沿用同一 authority turn，以 server 的 Village `npc_guide`、腳底位置、alive、互動狀態及目前綁定驗證新請求。商品 ID 與數量經 runtime validation；server 計算安全整數總價，payload 含 client 價格等額外欄位即拒絕。以既有 inventory packing 規則預算容量，餘額不足或放不下完整數量時，保留原 purse 與 bag。同一 receipt key 的相同請求回已結案結果，異內容拒絕。M7.4 以真 PG 驗證扣款、入包與 receipt 在同一 transaction 中提交或 rollback，以及 COMMIT 回覆遺失後的 receipt lookup。
 
 這個規則避免跨 DB 與即時 HP 做無法保證的分散式 atomic write；「atomic inventory」指 debit、receipt、item locations 一致，不承諾 network latency 期間的 heal 會回溯救回已死角色。可用 transaction 延遲測試固定此順序。
 
@@ -348,7 +355,7 @@ HTTP session revoke／expiry 會結束其 play lease；pending accepted economy 
 
 ## 10. Mobile 與 rendering
 
-React 管 account／inventory／party／AP／dialogue／HUD；Pixi 管 world、camera、sprite animation、damage numbers 與 ground loot。React 不每 tick setState 全世界；透過 selective subscriptions 更新 HUD，render adapter 從 snapshot／view model 讀取。
+React 管 account／inventory／party／AP／dialogue／shop／HUD；Pixi 管 world、camera、sprite animation、damage numbers 與 ground loot。React 不每 tick setState 全世界；透過 selective subscriptions 更新 HUD，render adapter 從 snapshot／view model 讀取。
 
 Camera follow local visual transform，clamp 至 map bounds；tile chunks／sprite viewport culling、atlas batching、effect pool 降低 GC。Logical view 參考1280×720，依可見區採 scale／letterbox；低寬度時 UI panels reflow。DPR cap2、WebGL baseline，WebGPU 可選但不要求。Simulation world 不跟著 canvas resize 改變。
 
@@ -372,7 +379,7 @@ Pointer input 轉為與 keyboard 相同的 InputFrame；多指方向／jump／at
 
 測試分層：pure unit／property tests（physics、combat、group allocation、AP、packing）、headless multi-actor scenarios（party／simultaneous hits）、network contract／two-browser integration、真 PG transaction／fault tests、mobile 實機與20人 load。RNG／clock 可注入；針對算法 invariants 與外部行為寫測試，避免只複製實作。Vitest 是基線；browser automation／load driver 選型由 M0.3／M3.5 決定，不引入與 task 無關的框架。
 
-M0.3 的 GitHub Actions 跑 frozen pnpm install、typecheck、lint、format check、dependency boundaries、Vitest 單元測試與 production build。Vitest headless harness 注入 clock、RNG 與 ID，Playwright 使用 Chromium 檢查 production client 與 server shell。Docker Compose 提供 PostgreSQL 開發／測試服務，以 TCP 執行 `SELECT 1` 驗證 readiness。操作指令見 [README](../README.md#驗證)。後續由 M2 加入 Tiled／topology／license 檢查，由 M7 加入 migration 與 PostgreSQL race／rollback 測試。
+GitHub Actions 的 `verify` 使用 `ubuntu-latest`，由 `.node-version` 取得 Node.js 24.22.3、由 `package.json` 取得 pnpm 11.19.0。執行 frozen install、typecheck、lint（含 dependency boundaries）、format check、Vitest、production build、Playwright Chromium smoke 與 Compose PostgreSQL 18.7 readiness。PG health smoke 以 TCP 執行 `SELECT 1`，正式 migration、race／rollback 測試由 M7 交付。 [操作指令](../README.md#驗證) · [CI 紀錄](evidence/CI-STABILIZATION.md)
 
 Deployment 為單 host／單 region：reverse proxy（TLS＋static Vite output）→單 Node.js process（HTTP＋Colyseus）→PostgreSQL（persistent volume 或 managed）。Docker Compose 用於 local／staging 與小規模部署；不使用 Node cluster／多 replicas。Initial node cap140 unique characters／14 rooms，admission 同時計入 reconnect／incoming reservations；同一 transfer character 在 node 計一次、來源／目的 room 各占一個 seat。由 M8.3 benchmark 下修或確認，不能用理論值當 capacity guarantee。
 
@@ -386,7 +393,7 @@ Observability 包含 process tick p95／p99、room occupancy、reserved seats、
 
 ## 12. 決策與官方參考
 
-版本相容性（Node LTS、pnpm、Colyseus server／SDK／schema、Drizzle／PG driver、Pixi v8）由 M0.1 查核並固定；Task 0 只確立能力與邊界，不指定未驗證的 package patch versions。下列官方文件於2026-11-23查閱，API 名稱仍以選定版本為準：
+M0.1 已查核並固定 Node.js、pnpm、Colyseus server／SDK／schema、Drizzle／PG driver 與 PixiJS 等工具版本。Task 0 查閱下列官方文件，實際 API 以目前 [版本矩陣](../README.md#版本矩陣) 為準。
 
 - [Colyseus Rooms](https://docs.colyseus.io/room)：room capacity、patch interval 與 loop adapters。Measured variable timestep 不等於本案的 fixed simulation。
 - [Colyseus State Synchronization](https://docs.colyseus.io/state) 與 [State View](https://docs.colyseus.io/state/view)：server Schema projection／per-client visibility；本案先以 targeted private messages 避免 personal loot 外洩。
@@ -395,4 +402,4 @@ Observability 包含 process tick p95／p99、room occupancy、reserved seats、
 - [Tiled JSON format](https://doc.mapeditor.org/en/stable/reference/json-map-format/)：Tile／Object Layers、GID 與 properties；只支援本案列明的子集。
 - [Drizzle Transactions](https://orm.drizzle.team/docs/transactions) 與 [PostgreSQL Explicit Locking](https://www.postgresql.org/docs/current/explicit-locking.html)：transaction／row lock 能力；業務 idempotency、鎖順序與 receipt 由本案實作。
 
-未決事項均有 defaults：正式 hosting／PG 版本 M0.1／M8.4、load driver M3.5、asset pipeline M2.4、實機與容量 M8.2／M8.3。沒有待選的 core architecture；若量測證明不相容，需新增 ADR 說明證據後再改 stack。
+正式 hosting 與備份部署由 M8.4 決定，實機矩陣與單節點容量由 M8.2／M8.3 驗收。若量測顯示需要更改既定架構，先記錄證據並另立 ADR。

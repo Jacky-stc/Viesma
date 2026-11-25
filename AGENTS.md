@@ -4,7 +4,7 @@
 
 ## 1. 當前階段與範圍
 
-- Task 0 只交付規格。未獲後續任務指示前，不執行 M0.1、不安裝 dependency、不建立遊戲程式、不初始化 Git、不建立 commit 或 push。
+- Task 0 的交付是規格基線，當時所有實作任務從 `NOT_STARTED` 起算。現行進度以 [ROADMAP](docs/ROADMAP.md) 的任務狀態為準。
 - 後續一次處理一項已授權的 roadmap task；先檢查 dependencies 與 acceptance criteria，避免自行擴張 milestone。
 - 不加入 Redis、Kubernetes、microservices、generic ECS、交易、Boss、dungeon 或完整 quest 系統，除非需求明確改變並記錄 ADR。
 - 保持原創；每項外部資產須記錄來源、作者、license 與 attribution，不使用未取得權利的 MapleStory 素材。
@@ -58,7 +58,9 @@
 4. 執行 task 要求的測試與人工驗證，記錄結果、限制及新增風險。
 5. 同步更新 roadmap 狀態、相關文件與 ADR；交付檔案、行為、驗證證據與未完成事項。
 
-日後狀態可使用 `NOT_STARTED`、`IN_PROGRESS`、`BLOCKED`、`DONE`。Task 0 交付的全部 roadmap tasks 必須維持 `NOT_STARTED`；規格撰寫不等於完成任何 implementation task。
+- 任務狀態為 `NOT_STARTED`、`IN_PROGRESS`、`LOCAL_VERIFIED`、`DONE`、`BLOCKED`。有阻礙時記錄影響、未驗證範圍與解除條件。
+- 獲授權提交實作時，必要本機驗證完成後在實作提交記錄 `LOCAL_VERIFIED`。其餘必要驗收與該實作提交的遠端 CI 通過後，才另以純文件提交記錄 `DONE`，連結實作 SHA 與 workflow。純狀態更新沿用實作提交的驗收證據，即使文件提交也觸發 CI。
+- 每項驗證記錄指令、環境與版本、結果、量測條件、限制及待驗證項目。詳細紀錄依 milestone 收錄，ROADMAP 保留證據連結。歷史紀錄保留當時結果，後續 CI 另附已確認的提交與 run。 [證據索引](docs/evidence/README.md)
 
 ## 7. 文件維護與 Git workflow
 

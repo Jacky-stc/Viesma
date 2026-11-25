@@ -27,7 +27,7 @@ docker compose up --detach --wait --wait-timeout 90
 docker compose ps
 ```
 
-`up --wait` 會等待 healthcheck 透過容器內的 TCP 連線成功驗證帳密並執行 `SELECT 1`。`docker compose ps` 應顯示 `healthy`。啟動失敗可用 `docker compose logs postgres` 查看原因。`docker compose down` 停止服務並保留 named volume。日後的 PostgreSQL schema、migration 與 transaction 測試由 M7 交付。
+`up --wait` 會等待 healthcheck 透過容器內的 TCP 連線成功驗證帳密並執行 `SELECT 1`。`docker compose ps` 應顯示 `healthy`。啟動失敗可用 `docker compose logs postgres` 查看原因。`docker compose down` 停止服務並保留 named volume。M5.3 後安排可拋棄資料庫的 inventory 契約 spike，正式 PostgreSQL schema、migration 與 transaction 驗收由 M7 交付。 [開發路線圖](docs/ROADMAP.md#postgresql-契約-spikem53-後)
 
 `.env` 與其他本機 env 檔由 Git 忽略。資料庫設定使用 `POSTGRES_*`，請保留 `VITE_*` 給可公開到瀏覽器的設定。使用 `config --quiet` 驗證 Compose，避免在終端或 CI 印出解析後的憑證。
 
@@ -99,7 +99,7 @@ pnpm run test:smoke
 
 六 worker 重疊時，測試主機資源競爭延遲 Node.js 喚醒，導致多人入房觸發 `WORLD_TICK_BACKLOG`。分批保留入房保護、固定 30 Hz 步進與每次喚醒最多 5 ticks、10 Hz 公開 patch、輸入佇列與 200 ms TTL，以及 ACK 與校正契約。需要重現整套平行負載時，可直接執行 `pnpm exec playwright test --workers=6`。
 
-Chromium 測試可使用 SwiftShader，預設連接埠為 4173 和 2567。若 2567 已有開發伺服器，PowerShell 可在同一個終端設定 `$env:VIESMA_SERVER_PORT = '25822'` 再執行 smoke。CI 或缺瀏覽器系統套件的 Linux 可用 `pnpm exec playwright install --with-deps chromium` 安裝 Chromium 和系統套件。Windows 驗證結果與負載限制見 [Pre-M3.4 維護紀錄](docs/ROADMAP.md#m33--remote-interpolation-與共享怪物-fixture)。
+Chromium 測試可使用 SwiftShader，預設連接埠為 4173 和 2567。若 2567 已有開發伺服器，PowerShell 可在同一個終端設定 `$env:VIESMA_SERVER_PORT = '25822'` 再執行 smoke。CI 或缺瀏覽器系統套件的 Linux 可用 `pnpm exec playwright install --with-deps chromium` 安裝 Chromium 和系統套件。Windows 驗證結果與負載限制見 [Pre-M3.4 維護紀錄](docs/evidence/CI-STABILIZATION.md#pre-m34-維護)。
 
 ### M1 多人測試
 

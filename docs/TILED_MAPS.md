@@ -55,7 +55,7 @@ pnpm run validate:maps @mapFiles
 
 每張地圖的 Tiled layer ID 與 object ID 各自唯一。Stable ID 使用小寫 ASCII 字母、數字、底線及連字號，開頭須為字母或數字。Collider、spawn、portal、NPC、loot fallback 各自有地圖內 ID 空間，玩家與怪物共用 spawn ID 空間。怪物型態由 archetype 定義，配置須在 manifest 的類型、等級和數量範圍內。Village 不可含怪。M2.1 允許先匯入尚未放滿怪物標記的 graybox。
 
-Manifest 驗證目的地、出生點 ID、反向關係與從 Village 出發的圖論可達性。每張供應的地圖均須含有 manifest 列出的 player spawn 和 portal。通用匯入器支援製作中的部分圖檔，正式發行用的 `loadGrayboxGameData` 和 CLI 要求七圖、完整怪物配置及 Village Guide。角色能否走到實際觸發矩形，另以固定步進遊走和瀏覽器操作驗證。 [M2.5 驗收](ROADMAP.md#m25--guide-npc-與世界-gate)
+Manifest 驗證目的地、出生點 ID、反向關係與從 Village 出發的圖論可達性。每張供應的地圖均須含有 manifest 列出的 player spawn 和 portal。通用匯入器支援製作中的部分圖檔，正式發行用的 `loadGrayboxGameData` 和 CLI 要求七圖、完整怪物配置及 Village Guide。角色能否走到實際觸發矩形，另以固定步進遊走和瀏覽器操作驗證。 [M2.5 驗收](evidence/M2.md#m25)
 
 ## GID 與未支援格式
 

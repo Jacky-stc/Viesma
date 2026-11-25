@@ -1,6 +1,6 @@
 # 遊戲設計與初始平衡
 
-版本：Task 0 / 2026-11-23。本文件是 MVP 遊戲規則的共同基線；所有數字均為待 playtest 的 configurable defaults，並非最終平衡。技術落實見 [ARCHITECTURE](ARCHITECTURE.md)，驗證任務見 [ROADMAP](ROADMAP.md)。MVP-A 使用相同規則搭配 in-memory authority，MVP-B 由 server 執行。
+遊戲規則以 Task 0（2026-11-23）為基線，於 2026-11-25 納入 Village 藥水商店。平衡數字為待 playtest 的 configurable defaults。技術落實見 [ARCHITECTURE](ARCHITECTURE.md)，驗證任務見 [ROADMAP](ROADMAP.md)。MVP-A 使用相同規則搭配 in-memory authority，MVP-B 由 server 執行。
 
 ## 1. 世界與單位
 
@@ -293,10 +293,17 @@ Village 滿房時先 reserve 另一 Village instance；若 node admission cap �
 
 Village 的 Guide 使用 Tiled 的 `npc_guide` 點。角色腳底中心至該點的直線距離須 ≤96 world units。角色存活、接地且未處於 Attack、Hurt 或傳送時，可按 E 或觸控「互動」開啟對話。接近只顯示提示。再按一次互動鍵或點「關閉」可結束對話，離開範圍、倒地、傳送或重生時也會關閉。
 
-對話內容包含移動／跳躍／攻擊、HP 藥水、組隊獎勵資格、死亡返村與 portal 方向。對話期間照常步進，沒有 quest state、shop 或 reward。↑／W 和觸控 ↑ 依 §1.1 的條件啟動傳送，七圖走訪是 M2.5 的交付驗收。
+對話內容包含移動／跳躍／攻擊、HP 藥水、組隊獎勵資格、死亡返村與 portal 方向。對話期間照常步進，教學對話本身沒有 quest state 或 reward。↑／W 和觸控 ↑ 依 §1.1 的條件啟動傳送，七圖走訪是 M2.5 的交付驗收。
 
 Config 分為 `physics`、`combat`、`progression`、`monsters`、`party`、`rewards`、`inventory`、`world`；每一份 build 指定 `balanceVersion`、`mapContentHash` 與 `protocolVersion`。Clock／session／DB retry 是 server operational config，不可由 client 修改。MVP 只在重啟／deploy 時換 balance，不做跨 tick hot reload。
 
 尚待實測：EXP pacing、AP 傾向、monster stats／密度、party bonus 10%、meaningful threshold 1%、15秒／640距離、120秒 expiry、loot rates、地圖尺寸與節奏。上述皆已有明確初值；M5.1／M6.3 建立 fixtures，M6.5 與 M8.3 做 playtest 後以同一 balanceVersion 修訂。正式 asset 名稱／license、實際 portal 座標由 M2.1／M2.4 決定；不能改變既定 topology 或缺少反向 portal。
 
 未來 Boss／party dungeon 可新增 encounter type、reward policy 及 instance routing；目前只保留 `encounterId`、group attribution 與 immutable reward intent，不建立 Boss AI、dungeon lifecycle 或 generic ECS。
+
+### 10.1 Village 藥水商店
+
+- M5.6 在既有 Village Guide（`npc_guide`）提供獨立的商店面板入口。沿用鍵盤／觸控互動及角色腳底中心距 NPC ≤96 world units 的規則。面板標示藥水、單價、數量、總價與購買結果，離開範圍、倒地、換圖或重生時關閉。
+- 只供應既有的 HP Potion 和 MP Potion，使用版控 game-data 定義每種藥水的固定正整數單價。M5.6 依貨幣掉落收入與先期 playtest 設定單價，納入 `balanceVersion`。商品目錄限這兩項，供應不限量。玩家出售、動態價格、交易及拍賣維持 MVP 範圍外。
+- Server 依商品目錄計價，驗證本人身分、當前連線與版本、Village 店點與互動距離、角色存活且可互動、有效品項、正整數數量、總價安全整數、餘額與第 8 節的堆疊／容量。依 slot 順序填滿既有相容 stacks，再使用空格。扣款與完整數量入包一次提交，任一條件失敗時保留原餘額與背包。
+- 同一購買請求重送只生效一次，成功由伺服器確認。已提交購買在換圖及同 session 重連後保留，M7 接上跨登出／重啟的 durable recovery。 [購買交易契約](ARCHITECTURE.md#82-一致性與各-transaction)
