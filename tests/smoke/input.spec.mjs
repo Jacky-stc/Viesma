@@ -220,6 +220,25 @@ test.describe('667 × 375 landscape touch input', () => {
 
     const right = await point('向右', 1)
     const jump = await point('跳躍', 2)
+    const cancelledControls = await page.evaluateHandle(() => {
+      const pressed = new Map()
+      const cancelled = []
+      globalThis.addEventListener(
+        'pointerdown',
+        (event) => {
+          if (event.pointerType === 'touch') pressed.set(event.pointerId, event.target.dataset?.inputControl)
+        },
+        { capture: true }
+      )
+      globalThis.addEventListener(
+        'pointercancel',
+        (event) => {
+          if (event.pointerType === 'touch') cancelled.push(pressed.get(event.pointerId))
+        },
+        { capture: true }
+      )
+      return cancelled
+    })
     await touch('touchStart', [right])
     await draw(2)
     await expect(hud(page)).toContainText('跑步 · 朝右')
@@ -227,6 +246,10 @@ test.describe('667 × 375 landscape touch input', () => {
     await draw(2)
     await expect(hud(page)).toContainText('跳躍 · 朝右')
     await touch('touchCancel')
+    // CDP 的回覆可能早於頁面接到 pointercancel，先確認兩個指標都已取消。
+    await expect
+      .poll(() => cancelledControls.jsonValue(), { message: 'Chromium should cancel both held touch pointers' })
+      .toEqual(expect.arrayContaining(['right', 'jump']))
     await draw(22)
     await expect(hud(page)).toContainText('待機 · 朝右')
 

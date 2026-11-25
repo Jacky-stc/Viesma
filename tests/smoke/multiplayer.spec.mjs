@@ -661,6 +661,39 @@ test('plays the two-browser slice at 150 ms RTT through transfer and reconnect',
   const count = (client) => client.getByLabel('同房角色數')
   const hud = (client) => client.getByLabel('Beginner 狀態')
   const remote = (client) => scene(client).evaluate(({ dataset }) => (dataset.remoteFrame ? JSON.parse(dataset.remoteFrame) : null))
+  async function expectObservedJump(player, spectator, startY, press, release) {
+    // 從輸入前開始記錄，避免輪詢錯過短暫的跳躍 HUD 或遠端高度。
+    const [localJump, remoteJump] = await Promise.all([
+      hud(player).evaluateHandle((element) => {
+        let jumped = false
+        const observer = new globalThis.MutationObserver(() => {
+          jumped ||= element.textContent.includes('跳躍')
+        })
+        observer.observe(element, { childList: true, characterData: true, subtree: true })
+        return { read: () => jumped, stop: () => observer.disconnect() }
+      }),
+      scene(spectator).evaluateHandle((host) => {
+        let minY = Number.POSITIVE_INFINITY
+        const observer = new globalThis.MutationObserver(() => {
+          const frame = host.dataset.remoteFrame
+          if (frame) minY = Math.min(minY, JSON.parse(frame).y)
+        })
+        observer.observe(host, { attributes: true, attributeFilter: ['data-remote-frame'] })
+        return { read: () => minY, stop: () => observer.disconnect() }
+      }),
+    ])
+    try {
+      await press()
+      await expect.poll(() => localJump.evaluate((trace) => trace.read()), { message: 'The player HUD should show a jump' }).toBe(true)
+      await release?.()
+      await expect.poll(() => remoteJump.evaluate((trace) => trace.read())).toBeLessThan(startY - 15)
+    } finally {
+      for (const trace of [localJump, remoteJump]) {
+        await trace.evaluate((trace) => trace.stop())
+        await trace.dispose()
+      }
+    }
+  }
   const x = async () => Number(await scene(traveler).getAttribute('data-local-authority-x'))
   const predictedX = async () => Number(await scene(traveler).getAttribute('data-local-predicted-x'))
   const errors = []
@@ -725,21 +758,7 @@ test('plays the two-browser slice at 150 ms RTT through transfer and reconnect',
     await expect(hud(page)).toContainText('跑步 · 朝左')
     await expect.poll(async () => (await remote(traveler))?.x).toBeLessThan(keyboardStart.x - 24)
     await page.keyboard.up('ArrowLeft')
-    const jumpTrace = await scene(traveler).evaluateHandle((host) => {
-      const { MutationObserver } = globalThis
-      let minY = Number.POSITIVE_INFINITY
-      const observer = new MutationObserver(() => {
-        const frame = host.dataset.remoteFrame
-        if (frame) minY = Math.min(minY, JSON.parse(frame).y)
-      })
-      observer.observe(host, { attributes: true, attributeFilter: ['data-remote-frame'] })
-      return { read: () => minY, stop: () => observer.disconnect() }
-    })
-    await page.keyboard.press('Space')
-    await expect(hud(page)).toContainText('跳躍')
-    await expect.poll(() => jumpTrace.evaluate((trace) => trace.read())).toBeLessThan(keyboardStart.y - 15)
-    await jumpTrace.evaluate((trace) => trace.stop())
-    await jumpTrace.dispose()
+    await expectObservedJump(page, traveler, keyboardStart.y, () => page.keyboard.press('Space'))
     await expect(hud(page)).toContainText('待機')
 
     await traveler.bringToFront()
@@ -758,10 +777,7 @@ test('plays the two-browser slice at 150 ms RTT through transfer and reconnect',
     await releaseTouch()
     await expect.poll(async () => (await remote(page))?.x).toBeGreaterThan(touchStart.x + 24)
     await expect(hud(traveler)).toContainText('待機')
-    await pressTouch('跳躍')
-    await expect(hud(traveler)).toContainText('跳躍')
-    await releaseTouch()
-    await expect.poll(async () => (await remote(page))?.y).toBeLessThan(touchStart.y - 15)
+    await expectObservedJump(traveler, page, touchStart.y, () => pressTouch('跳躍'), releaseTouch)
     await expect(hud(traveler)).toContainText('待機')
 
     await traveler.getByRole('region', { name: '平台測試場' }).focus()
