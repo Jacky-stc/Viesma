@@ -28,6 +28,7 @@ import {
   getPlayerPresentationState,
   ticksPerSecond,
   type FixedTickDriver,
+  type PlayerControllerState,
 } from '@viesma/simulation'
 import { attachBrowserInput } from '../input/browser-input'
 import { createWorldRenderer } from '../rendering/world-renderer'
@@ -78,6 +79,50 @@ interface Recovery {
   nextAttempt: number
 }
 
+function traceController(controller: PlayerControllerState | undefined) {
+  if (!controller) return null
+  const { position, physics, movement, action, lastHurtTick } = controller
+  return { x: position.x, y: position.y, vy: physics.velocity.y, grounded: physics.grounded, action, movement, lastHurtTick }
+}
+
+type SmokeMovementRecord =
+  | { kind: 'snapshot'; serverTick: number; accepted: boolean; player: PublicPlayer | null }
+  | (RoomLocation & {
+      kind: 'checkpoint'
+      connectionEpoch: string
+      serverTick: number
+      ackInputSeq: number | null
+      result: string
+      controller: ReturnType<typeof traceController>
+      predictedX: number | null
+      pendingInputs: number
+      replayedInputs: number
+    })
+  | {
+      kind: 'portal-edge'
+      roomId: string
+      mapEpoch: number
+      localTick: number
+      inputSeq: number | null
+      portalId: string | null
+      x: number
+    }
+  | { kind: 'transfer-offer'; requestId: number | null; sourceRoomId: string; destination: RoomLocation }
+  | {
+      kind: 'input'
+      localTick: number
+      predictedTick: number | null
+      inputSeq: number | null
+      mapEpoch: number
+      moveX: number
+      jumpPressed: boolean
+      controller: ReturnType<typeof traceController>
+    }
+  | { kind: 'jump-sent'; localTick: number; inputSeq: number; mapEpoch: number }
+  | { kind: 'render'; rafMs: number; serverTick: number | null; y: number | null; visualTick: number | null; mode: string | null }
+
+type SmokeMovementObserver = { targetCharacterId?: string; record(event: SmokeMovementRecord): void }
+
 const reconnectMilliseconds = 30_000
 const transferWaitMilliseconds = 11_000
 const reconnectRetryMilliseconds = 500
@@ -109,6 +154,10 @@ export async function runMultiplayer(
   if (signal.aborted) return
   const document = host.ownerDocument
   const diagnostics = new URLSearchParams(document.location.search).get('multiplayerDiagnostics') === '1'
+  // 僅由瀏覽器測試夾具在頁面初始化前安裝，資料留在頁內。
+  const smokeTrace = diagnostics
+    ? (document.defaultView as (Window & { __viesmaMovementSmoke?: SmokeMovementObserver }) | null)?.__viesmaMovementSmoke
+    : undefined
   const data = loadGrayboxGameData()
   const maps = new Map<string, NormalizedMap>(data.tiledMaps.map((map) => [map.id, map]))
   const bytes = new TextEncoder().encode(serializeMapManifest(data))
@@ -301,13 +350,20 @@ export async function runMultiplayer(
       const peers = players.filter((player) => player !== self)
       const monsters = readPublicMonsters(state)
       scene.combat.snapshot(mapInstanceId, serverTick, players, monsters)
-      scene.remote.receive(
+      const accepted = scene.remote.receive(
         { mapInstanceId, mapId, connectionEpoch: binding.connectionEpoch, mapEpoch: self.mapEpoch },
         serverTick,
         performance.now(),
         peers,
         monsters
       )
+      if (smokeTrace?.targetCharacterId)
+        smokeTrace.record({
+          kind: 'snapshot',
+          serverTick,
+          accepted,
+          player: players.find((p) => p.characterId === smokeTrace.targetCharacterId) ?? null,
+        })
       scene.latest = { self, serverTick, mapInstanceId }
       if (diagnostics && active === scene) {
         host.dataset.remoteSnapshotTick = String(serverTick)
@@ -337,6 +393,21 @@ export async function runMultiplayer(
       const prediction = (scene.prediction ??= createLocalPrediction(map, latest.mapInstanceId, binding))
       const before = prediction.predicted?.controller.position
       const result = prediction.receive(checkpoint)
+      if (smokeTrace?.targetCharacterId === binding.characterId)
+        smokeTrace.record({
+          kind: 'checkpoint',
+          roomId: location.roomId,
+          mapId: location.mapId,
+          mapEpoch: location.mapEpoch,
+          connectionEpoch: binding.connectionEpoch,
+          serverTick: checkpoint.serverTick,
+          ackInputSeq: checkpoint.ackInputSeq,
+          result,
+          controller: traceController(checkpoint.controller),
+          predictedX: prediction.predicted?.controller.position.x ?? null,
+          pendingInputs: prediction.diagnostics.pendingInputs,
+          replayedInputs: prediction.diagnostics.replayedInputs,
+        })
       const after = prediction.predicted?.controller.position
       if (result === 'ignored' || !after) return
       if (awaiting === scene) activate(scene)
@@ -379,6 +450,13 @@ export async function runMultiplayer(
         publishStatus('正在返回 Village…')
       }
       if (travel?.source !== scene || travel.requestId !== offer.requestId || travel.offer) return
+      if (smokeTrace?.targetCharacterId === binding.characterId)
+        smokeTrace.record({
+          kind: 'transfer-offer',
+          requestId: offer.requestId,
+          sourceRoomId: location.roomId,
+          destination: { roomId: offer.roomId, mapId: offer.mapId, mapEpoch: offer.mapEpoch },
+        })
       travel.offer = offer
       scene.recoveryTarget = {
         requestId: offer.requestId,
@@ -454,6 +532,16 @@ export async function runMultiplayer(
         const controller = prediction.predicted?.controller
         if (intent.portalPressed && controller) {
           const portal = findOverlappingPortal(scene.map, controller.position)
+          if (smokeTrace?.targetCharacterId === binding.characterId)
+            smokeTrace.record({
+              kind: 'portal-edge',
+              roomId: room.roomId,
+              mapEpoch: binding.mapEpoch,
+              localTick: tick,
+              inputSeq: controller.movement.lastProcessedInputSeq,
+              portalId: portal?.id ?? null,
+              x: controller.position.x,
+            })
           if (portal) {
             const requestId = ++scene.requestId
             travel = { source: scene, requestId, until: performance.now() + transferWaitMilliseconds }
@@ -464,8 +552,22 @@ export async function runMultiplayer(
           }
         }
         const frame = prediction.step(intent, tick)
-        if (frame) room.send(inputFrameMessage, frame)
-        else {
+        const trace = smokeTrace?.targetCharacterId === binding.characterId ? smokeTrace : undefined
+        if (trace)
+          trace.record({
+            kind: 'input',
+            localTick: tick,
+            predictedTick: prediction.predicted?.tick ?? null,
+            inputSeq: frame?.seq ?? null,
+            mapEpoch: binding.mapEpoch,
+            moveX: intent.moveX,
+            jumpPressed: intent.jumpPressed,
+            controller: traceController(prediction.predicted?.controller),
+          })
+        if (frame) {
+          room.send(inputFrameMessage, frame)
+          if (frame.jumpPressed) trace?.record({ kind: 'jump-sent', localTick: tick, inputSeq: frame.seq, mapEpoch: frame.mapEpoch })
+        } else {
           driver = undefined
           scene.correction.reset()
           input.clearForRoomChange()
@@ -518,6 +620,17 @@ export async function runMultiplayer(
       monsters,
       damage: scene.combat.sample(now),
     })
+    if (smokeTrace?.targetCharacterId) {
+      const target = peers.get(smokeTrace.targetCharacterId)
+      smokeTrace.record({
+        kind: 'render',
+        rafMs: now,
+        serverTick: scene.latest.serverTick,
+        y: target?.position.y ?? null,
+        visualTick: target?.visualTick ?? null,
+        mode: target?.mode ?? null,
+      })
+    }
     if (diagnostics) {
       const peer = peers.values().next().value
       const trace = peer ? JSON.stringify({ ...peer.position, tick: peer.visualTick, mode: peer.mode }) : ''

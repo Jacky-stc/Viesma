@@ -31,6 +31,7 @@ import {
   type SimulationState,
 } from '@viesma/simulation'
 import type { EncounterRewardWorker } from './encounter-reward-worker.ts'
+import type { InputDecision, MovementTraceSink, WatchMovement } from './movement-trace.ts'
 
 export const mapRoomCapacity = 20
 const initialMapEpoch = 0
@@ -74,8 +75,12 @@ function createSeat(binding: MapRoomJoin & { characterId: CharacterId }, nowMill
   }
 }
 
-function expireQueuedInputs(pending: QueuedFrame[], nowMilliseconds: number): void {
-  while (pending[0] && nowMilliseconds - pending[0].receivedMilliseconds > inputQueueTtlMilliseconds) pending.shift()
+function expireQueuedInputs(pending: QueuedFrame[], nowMilliseconds: number, serverTick: number, trace?: MovementTraceSink): void {
+  while (pending[0] && nowMilliseconds - pending[0].receivedMilliseconds > inputQueueTtlMilliseconds) {
+    const { frame, receivedMilliseconds } = pending[0]
+    pending.shift()
+    trace?.({ kind: 'input-retired', serverTick, inputSeq: frame.seq, reason: 'ttl', ageMs: nowMilliseconds - receivedMilliseconds })
+  }
 }
 
 interface MapCombatOptions {
@@ -94,7 +99,8 @@ export function createMapRuntime(
   nextId: () => string,
   monsterSpawns?: { readonly definitions: readonly MonsterSpawnDefinition[]; readonly maxActive: number },
   roomId: string = mapInstanceId,
-  combatOptions?: MapCombatOptions
+  combatOptions?: MapCombatOptions,
+  watchMovement?: WatchMovement
 ) {
   const controller = createPlayerController(map)
   const rng = createSeededRng(1)
@@ -191,6 +197,11 @@ export function createMapRuntime(
   }
 
   function clearInput(seat: CharacterSeat, resetSequence = false) {
+    const trace = watchMovement?.(seat.characterId)
+    if (trace) {
+      for (const { frame } of seat.pending)
+        trace({ kind: 'input-retired', serverTick: state.tick, inputSeq: frame.seq, reason: 'cleared', ageMs: null })
+    }
     seat.pending.length = 0
     const body = player(seat.characterId)
     if (!body) return
@@ -315,18 +326,25 @@ export function createMapRuntime(
     },
     receive(connection: object, payload: unknown, nowMilliseconds: number): boolean {
       const actor = bindings.get(connection)
-      if (!actor || actor.dead || actor.frozen) return false
+      if (!actor) return false
+      const trace = watchMovement?.(actor.characterId)
+      function decide(reason: InputDecision, inputSeq: number | null) {
+        trace?.({ kind: 'input-decision', serverTick: state.tick, inputSeq, reason, queueDepth: actor?.pending.length ?? 0 })
+        return reason === 'queued'
+      }
+      if (actor.dead || actor.frozen) return decide(actor.dead ? 'dead' : 'frozen', null)
       const elapsed = nowMilliseconds - actor.lastRefillMilliseconds
       actor.lastRefillMilliseconds = nowMilliseconds
       actor.inputTokens = Math.min(inputBurst, actor.inputTokens + (elapsed * inputRate) / 1000)
-      if (actor.inputTokens < 1) return false
+      if (actor.inputTokens < 1) return decide('rate', null)
       actor.inputTokens -= 1
 
       const frame = parseInputFrame(payload)
-      if (!frame || frame.connectionEpoch !== actor.connectionEpoch || frame.mapEpoch !== actor.mapEpoch) return false
+      if (!frame) return decide('invalid-frame', null)
+      if (frame.connectionEpoch !== actor.connectionEpoch || frame.mapEpoch !== actor.mapEpoch) return decide('epoch', frame.seq)
       const maxSeq = inputBurst + Math.floor(((nowMilliseconds - actor.joinedMilliseconds) * ticksPerSecond) / 1000)
-      if (frame.seq > maxSeq) return false
-      expireQueuedInputs(actor.pending, nowMilliseconds)
+      if (frame.seq > maxSeq) return decide('ahead', frame.seq)
+      expireQueuedInputs(actor.pending, nowMilliseconds, state.tick, trace)
       if (actor.lastReceivedInputSeq !== null && frame.seq <= actor.lastReceivedInputSeq) {
         const newest = actor.pending.at(-1)
         const last = newest?.frame
@@ -337,16 +355,24 @@ export function createMapRuntime(
         ) {
           newest.conflict = true
         }
-        return false
+        return decide('duplicate', frame.seq)
       }
       actor.lastReceivedInputSeq = frame.seq
       if (actor.pending.length === inputQueueCapacity) {
         const evicted = actor.pending.findIndex(({ conflict, frame }) => conflict || (!frame.jumpPressed && !frame.attackPressed))
-        if (evicted === -1) return false
-        actor.pending.splice(evicted, 1)
+        if (evicted === -1) return decide('queue-full', frame.seq)
+        const [removed] = actor.pending.splice(evicted, 1)
+        if (removed)
+          trace?.({
+            kind: 'input-retired',
+            serverTick: state.tick,
+            inputSeq: removed.frame.seq,
+            reason: 'evicted',
+            ageMs: nowMilliseconds - removed.receivedMilliseconds,
+          })
       }
       actor.pending.push({ frame, receivedMilliseconds: nowMilliseconds, conflict: false })
-      return true
+      return decide('queued', frame.seq)
     },
     advance({ tick, dtSeconds }: FixedTick, nowMilliseconds: number): void {
       if (disposed) return
@@ -354,6 +380,7 @@ export function createMapRuntime(
       const players = []
       const frozen = []
       const commands: PlayerInputCommand[] = []
+      const traced = watchMovement && new Map<string, { trace: MovementTraceSink; before: SimulationPlayer; applied?: ParsedFrame }>()
       // 僅在 tick 邊界建立與移除 body。step 依 characterId 排序角色並套用輸入。
       for (const actor of seats.values()) {
         const { characterId } = actor
@@ -363,24 +390,50 @@ export function createMapRuntime(
           continue
         }
         players.push(player)
-        expireQueuedInputs(actor.pending, nowMilliseconds)
+        const trace = watchMovement?.(characterId)
+        expireQueuedInputs(actor.pending, nowMilliseconds, tick, trace)
         const pending = actor.pending.shift()
-        if (pending && !pending.conflict)
+        const applied = pending?.conflict ? undefined : pending?.frame
+        if (trace) {
+          traced?.set(characterId, { trace, before: player, ...(applied && { applied }) })
+          if (pending?.conflict)
+            trace({
+              kind: 'input-retired',
+              serverTick: tick,
+              inputSeq: pending.frame.seq,
+              reason: 'conflict',
+              ageMs: nowMilliseconds - pending.receivedMilliseconds,
+            })
+        }
+        if (applied)
           commands.push({
             kind: 'input',
             characterId,
             lifeStartedTick: player.lifeStartedTick,
-            seq: pending.frame.seq,
-            moveX: pending.frame.moveX,
-            jumpPressed: pending.frame.jumpPressed,
-            attackPressed: pending.frame.attackPressed,
+            seq: applied.seq,
+            moveX: applied.moveX,
+            jumpPressed: applied.jumpPressed,
+            attackPressed: applied.attackPressed,
           })
+      }
+      const observedController: typeof controller = (before, input, events, tick) => {
+        const after = controller(before, input, events, tick)
+        if ('characterId' in before && typeof before.characterId === 'string')
+          traced?.get(before.characterId)?.trace({
+            kind: 'controller',
+            serverTick: tick,
+            inputSeq: input?.seq ?? null,
+            jumpPressed: input?.jumpPressed ?? false,
+            before,
+            after,
+          })
+        return after
       }
       const result = step({ ...state, map: { ...state.map, players } }, commands, dtSeconds, {
         tick,
         rng,
         ids,
-        playerController: controller,
+        playerController: traced?.size ? observedController : controller,
         monsters: monsterContext,
         ...(combat && { combat: { ...combat, admitAttacks: rewards?.canAdmitAttacks() ?? true } }),
       })
@@ -394,16 +447,41 @@ export function createMapRuntime(
         if (event.kind === 'playerDied') deaths.add(event.characterId)
         if (event.kind === 'monsterDeathClaimed') rewards?.accept(event.intent)
         if (event.kind === 'monsterDamaged' || event.kind === 'playerDamaged') recordDamage(event)
+        if (event.kind === 'playerDamaged') watchMovement?.(event.characterId)?.({ kind: 'damage', event })
       }
       while (recentDamage[0] && tick - recentDamage[0].tick > maxCombatDamageAgeTicks) recentDamage.shift()
       for (const actor of seats.values()) {
         if (deaths.has(actor.characterId)) {
           actor.dead = true
+          const trace = watchMovement?.(actor.characterId)
+          if (trace) {
+            for (const { frame, receivedMilliseconds } of actor.pending)
+              trace({
+                kind: 'input-retired',
+                serverTick: tick,
+                inputSeq: frame.seq,
+                reason: 'death',
+                ageMs: nowMilliseconds - receivedMilliseconds,
+              })
+          }
           actor.pending.length = 0
         }
         const firstOutstanding = actor.pending[0]?.frame.seq
         // 佇列嚴格遞增，且本 tick 已移除首幀，所以剩餘的首序號至少為 1。
         actor.ackInputSeq = firstOutstanding === undefined ? actor.lastReceivedInputSeq : ((firstOutstanding - 1) as ParsedFrame['seq'])
+      }
+      if (traced?.size) {
+        for (const after of state.map.players) {
+          const entry = traced.get(after.characterId)
+          entry?.trace({
+            kind: 'tick',
+            serverTick: tick,
+            inputSeq: entry.applied?.seq ?? null,
+            jumpPressed: entry.applied?.jumpPressed ?? false,
+            before: entry.before,
+            after,
+          })
+        }
       }
     },
     snapshot(): PublicMapRoom {

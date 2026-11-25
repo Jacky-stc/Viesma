@@ -5,6 +5,8 @@ import { setImmediate } from 'node:timers/promises'
 import { expect, test, vi } from 'vitest'
 import { createMemoryEncounterRewardPort } from '../src/runtime/encounter-reward-worker.ts'
 import { createWorldCoordinator } from '../src/runtime/world-coordinator.ts'
+import { movementSmokeData, movementSmokeMaxPlayerX } from './movement-smoke-fixture.mjs'
+import { combatPeer, sendCombatInput } from './shared-combat-fixture.mjs'
 
 function harness(createDestination, data = loadGrayboxGameData(), dependencies = {}) {
   let now = 0
@@ -42,6 +44,57 @@ function peer() {
 const session = (peer) => peer.joined.mock.lastCall[0]
 const offer = (peer) => peer.offer.mock.lastCall[0]
 const body = (room, peer) => room.player(session(peer).characterId)
+
+test('isolates the smoke jump from a real entrance Slime hit while preserving the shared monsters', () => {
+  const paths = [loadGrayboxGameData(), movementSmokeData()].map((data) => {
+    const { world, advance } = harness(undefined, data)
+    const room = world.createRoom()
+    const traveler = combatPeer()
+    expect(world.join(room, traveler)).toBe(true)
+    advance()
+    return { world, room, traveler, advance, player: () => room.player(traveler.session.characterId) }
+  })
+  const [original, movement] = paths
+  const monsters = ({ room }) => room.snapshot().monsters.map(({ monsterId, archetypeId, hp }) => ({ monsterId, archetypeId, hp }))
+  expect(monsters(movement)).toHaveLength(10)
+  expect(monsters(movement)).toEqual(monsters(original))
+
+  function step(input) {
+    for (const { world, room, traveler, advance } of paths) {
+      expect(sendCombatInput(world, room, traveler, input)).toBe(true)
+      advance()
+    }
+  }
+
+  for (let tick = 0; tick < 24; tick++) step({ moveX: 1 })
+  for (let tick = 0; tick < 8; tick++) step({})
+  expect(movement.player().position).toEqual(original.player().position)
+  expect(movement.player().position.x).toBeLessThan(movementSmokeMaxPlayerX)
+  const lastHit = original.player().lastHurtTick
+  for (let tick = 0; tick < 36 && original.player().lastHurtTick === lastHit; tick++) step({})
+  expect(original.player()).toMatchObject({
+    lastHurtTick: original.room.snapshot().serverTick,
+    position: { y: 848 },
+    physics: { grounded: true },
+    action: { kind: 'hurt', ticksRemaining: 6 },
+  })
+
+  step({ jumpPressed: true })
+  expect(original.player()).toMatchObject({
+    position: { y: 848 },
+    movement: { lastProcessedInputSeq: original.traveler.seq, jumpBufferTicksRemaining: 0 },
+    action: { kind: 'hurt', ticksRemaining: 5 },
+  })
+  expect(movement.player()).toMatchObject({
+    vitals: { hp: 50 },
+    physics: { grounded: false },
+    movement: { lastProcessedInputSeq: movement.traveler.seq },
+    locomotion: 'jump',
+  })
+  expect(movement.player().position.y).toBeLessThan(833)
+  expect(monsters(movement)).toEqual(monsters(original))
+  for (const { world, room } of paths) world.disposeRoom(room)
+})
 
 function dataWithSpawnNearSlime() {
   const data = loadGrayboxGameData()

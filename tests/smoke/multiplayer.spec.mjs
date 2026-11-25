@@ -2,9 +2,12 @@ import { expect, test } from '@playwright/test'
 import { Buffer } from 'node:buffer'
 import console from 'node:console'
 import { performance } from 'node:perf_hooks'
+import process from 'node:process'
 import { clearTimeout, setTimeout } from 'node:timers'
 import { URL } from 'node:url'
 import { joinSmokePeer, startBrowserFixtureServer } from '../../apps/server/test/browser-fixture-server.mjs'
+import { movementSmokeMaxPlayerX } from '../../apps/server/test/movement-smoke-fixture.mjs'
+import { installMovementRecorder, startMobileJumpTrace } from './mobile-jump-trace.mjs'
 
 function monsterProjection(page) {
   return page
@@ -21,7 +24,7 @@ async function routeFixtureRoom(page, fixture) {
   return () => seat
 }
 
-async function routeFixtureTravel(page, fixture, beforeJoin = () => {}) {
+async function routeFixtureTravel(page, fixture, beforeJoin = () => {}, onReserved) {
   let seat
   await page.route('**/multiplayer/matchmake/joinById/*', async (route) => {
     await beforeJoin(route.request().postDataJSON())
@@ -29,6 +32,7 @@ async function routeFixtureTravel(page, fixture, beforeJoin = () => {}) {
     const response = await route.fetch({ url: `http://${fixture.address}${pathname.slice('/multiplayer'.length)}` })
     if (!response.ok()) return route.fulfill({ response })
     seat = { ...(await response.json()), publicAddress: fixture.address }
+    onReserved?.(seat)
     await route.fulfill({ json: seat })
   })
   return () => seat
@@ -652,16 +656,22 @@ test('interpolates under patch jitter and shares M1 monsters through rejoin and 
   }
 })
 
-test('plays the two-browser slice at 150 ms RTT through transfer and reconnect', async ({ page, browser, baseURL }) => {
+test('plays the two-browser slice at 150 ms RTT through transfer and reconnect', async ({ page, browser, baseURL }, testInfo) => {
+  const startedAt = performance.timeOrigin + performance.now()
+  const marks = []
+  function mark(kind, details = {}) {
+    const tMs = Math.round(performance.timeOrigin + performance.now() - startedAt)
+    if (marks.length < 64) marks.push({ kind, tMs, budgetMs: testInfo.timeout - tMs, ...details })
+  }
   const traveler = await browser.newPage({ baseURL, viewport: { width: 667, height: 375 }, hasTouch: true, isMobile: true })
-  const fixture = await startBrowserFixtureServer()
+  const fixture = await startBrowserFixtureServer({ movementScenario: true, traceMovement: true })
   const scene = (client) => client.locator('.playground-canvas')
   const canvas = (client) => client.getByRole('img', { name: 'Beginner 平台場景' })
   const map = (client) => client.getByLabel('目前地圖')
   const count = (client) => client.getByLabel('同房角色數')
   const hud = (client) => client.getByLabel('Beginner 狀態')
   const remote = (client) => scene(client).evaluate(({ dataset }) => (dataset.remoteFrame ? JSON.parse(dataset.remoteFrame) : null))
-  async function expectObservedJump(player, spectator, startY, press, release) {
+  async function expectObservedJump(player, spectator, startY, press, release, observeMinimum) {
     // 從輸入前開始記錄，避免輪詢錯過短暫的跳躍 HUD 或遠端高度。
     const [localJump, remoteJump] = await Promise.all([
       hud(player).evaluateHandle((element) => {
@@ -686,7 +696,13 @@ test('plays the two-browser slice at 150 ms RTT through transfer and reconnect',
       await press()
       await expect.poll(() => localJump.evaluate((trace) => trace.read()), { message: 'The player HUD should show a jump' }).toBe(true)
       await release?.()
-      await expect.poll(() => remoteJump.evaluate((trace) => trace.read())).toBeLessThan(startY - 15)
+      await expect
+        .poll(async () => {
+          const minimum = await remoteJump.evaluate((trace) => trace.read())
+          observeMinimum?.(minimum)
+          return minimum
+        })
+        .toBeLessThan(startY - 15)
     } finally {
       for (const trace of [localJump, remoteJump]) {
         await trace.evaluate((trace) => trace.stop())
@@ -700,17 +716,111 @@ test('plays the two-browser slice at 150 ms RTT through transfer and reconnect',
   const { promise: allowRecovery, resolve: releaseRecovery } = Promise.withResolvers()
   let trips = 0
   let reconnects = 0
-  try {
-    const observerSeat = await routeFixtureRoom(page, fixture)
-    await routeFixtureRoom(traveler, fixture)
-    const networks = await Promise.all([page, traveler].map((client) => delayRoomTraffic(client, fixture.address, 75)))
-    const destinationSeat = await routeFixtureTravel(traveler, fixture, async ({ ticket }) => {
-      if (ticket) trips++
-      else {
-        reconnects++
-        await allowRecovery
+  let mobileTrace
+  let travelerSeat
+  let destinationSeat
+  let phase = 'setup'
+  function enterPhase(next) {
+    phase = next
+    mark('phase', { phase })
+  }
+  const travelerView = () =>
+    scene(traveler).evaluate(({ dataset, ownerDocument }) => {
+      const checkpoint = globalThis.__viesmaMovementSmoke.checkpoint
+      return {
+        roomId: checkpoint?.roomId,
+        connectionEpoch: checkpoint?.connectionEpoch,
+        mapEpoch: checkpoint?.mapEpoch,
+        checkpointTick: checkpoint?.serverTick,
+        checkpointX: checkpoint?.controller.x,
+        x: Number(dataset.localAuthorityX),
+        predictedX: Number(dataset.localPredictedX),
+        revision: dataset.multiplayerSceneRevision,
+        characterId: dataset.multiplayerCharacterId,
+        map: ownerDocument.querySelector('[aria-label="目前地圖"]')?.textContent,
+        status: Array.from(ownerDocument.querySelectorAll('.playground-status'), (element) => element.textContent),
       }
     })
+  async function approachPortal(seat, { mapEpoch, portal, min, max }) {
+    let releaseAt
+    await traveler.keyboard.down('ArrowLeft')
+    try {
+      // 以權威角色進入門區為放鍵條件，為尚在傳輸中的移動幀留出煞停空間。
+      await expect
+        .poll(
+          () => {
+            releaseAt = fixture.movementAt(seat)
+            return releaseAt?.x
+          },
+          { intervals: [25], message: 'The authoritative character should enter the portal approach' }
+        )
+        .toBeLessThan(max - 16)
+      mark('release-direction', { phase, authority: releaseAt })
+    } finally {
+      await traveler.keyboard.up('ArrowLeft')
+    }
+    await Promise.all([
+      expect(hud(traveler)).toContainText('待機'),
+      expect
+        .poll(
+          async () => {
+            const authority = fixture.movementAt(seat)
+            const view = await travelerView()
+            // 伺服器停穩時，本機可能仍在重播放鍵前的幀。等待同一連線的停穩 checkpoint。
+            return {
+              mapEpoch: view.mapEpoch,
+              roomId: view.roomId,
+              atRest: authority?.moveX === 0 && authority?.vx === 0,
+              eligiblePortal: authority?.eligiblePortal,
+              confirmedStop: authority != null && view.connectionEpoch === authority.connectionEpoch && view.checkpointX === authority.x,
+              inRange: [authority?.x, view.x, view.predictedX].every((position) => position > min && position < max),
+              positions: { authority: authority?.x, checkpoint: view.checkpointX, renderedPrediction: view.predictedX },
+            }
+          },
+          { message: 'The authority and the reconciled client should settle inside the original portal bounds' }
+        )
+        .toMatchObject({ mapEpoch, roomId: seat.roomId, atRest: true, eligiblePortal: portal, confirmedStop: true, inRange: true }),
+    ])
+  }
+
+  async function arrivalCheckpoint(expected) {
+    await expect
+      .poll(
+        async () => {
+          const reservation = destinationSeat()
+          const view = await travelerView()
+          return {
+            ...view,
+            matchesReservation: reservation !== undefined && view.roomId === reservation.roomId,
+            trips,
+            reconnects,
+            arrivals: reservation ? fixture.players(reservation) : [],
+            errors,
+          }
+        },
+        { message: 'The destination checkpoint and visible scene should belong to the committed room' }
+      )
+      .toMatchObject({ matchesReservation: true, checkpointTick: expect.any(Number), ...expected })
+  }
+  enterPhase('setup')
+  try {
+    const observerSeat = await routeFixtureRoom(page, fixture)
+    travelerSeat = await routeFixtureRoom(traveler, fixture)
+    await Promise.all([page, traveler].map(installMovementRecorder))
+    const networks = await Promise.all([page, traveler].map((client) => delayRoomTraffic(client, fixture.address, 75)))
+    destinationSeat = await routeFixtureTravel(
+      traveler,
+      fixture,
+      async ({ ticket }) => {
+        mark('join-request', { transferTicket: Boolean(ticket), phase })
+        if (ticket) trips++
+        else {
+          reconnects++
+          await allowRecovery
+        }
+      },
+      ({ roomId }) => mark('join-reserved', { roomId, phase })
+    )
     await traveler.addInitScript(() => {
       const { MutationObserver, document } = globalThis
       const revisions = new Map()
@@ -724,16 +834,24 @@ test('plays the two-browser slice at 150 ms RTT through transfer and reconnect',
       }).observe(document, { subtree: true, attributes: true, attributeFilter: ['data-multiplayer-scene-revision'] })
       globalThis.sceneResets = revisions
     })
-    for (const client of [page, traveler]) {
-      client.on('pageerror', (error) => errors.push(error.message))
-      await client.goto('/?multiplayerDiagnostics=1')
-      await client.getByLabel('場景模式').selectOption('multiplayer')
-      await expect(map(client)).toHaveText('Forest Entrance')
-      await expect(client.getByText('開發用匿名身分 · 進度僅暫存於伺服器記憶體')).toBeVisible()
-    }
-    await expect(count(page)).toHaveText('同房 2 人')
-    await expect(count(traveler)).toHaveText('同房 2 人')
-    await expect(scene(traveler)).toHaveAttribute('data-multiplayer-scene-revision', '1')
+    await Promise.all(
+      [page, traveler].map(async (client) => {
+        client.on('pageerror', (error) => errors.push(error.message))
+        await client.goto('/?multiplayerDiagnostics=1', { waitUntil: 'domcontentloaded' })
+      })
+    )
+    await page.getByLabel('場景模式').selectOption('multiplayer')
+    // 確保第二頁可加入第一頁所建立的房間。
+    await expect.poll(() => observerSeat()?.roomId, { intervals: [25] }).toBeTruthy()
+    await traveler.getByLabel('場景模式').selectOption('multiplayer')
+    await Promise.all([
+      ...[page, traveler].flatMap((client) => [
+        expect(map(client)).toHaveText('Forest Entrance'),
+        expect(client.getByText('開發用匿名身分 · 進度僅暫存於伺服器記憶體')).toBeVisible(),
+        expect(count(client)).toHaveText('同房 2 人'),
+      ]),
+      expect(scene(traveler)).toHaveAttribute('data-multiplayer-scene-revision', '1'),
+    ])
     const characterId = await scene(traveler).getAttribute('data-multiplayer-character-id')
     const monsters = (await monsterProjection(page)).monsters.map(({ monsterId, hp }) => ({ monsterId, hp }))
     const sprites = monsters.map(({ monsterId }) => monsterId).join(',')
@@ -742,18 +860,20 @@ test('plays the two-browser slice at 150 ms RTT through transfer and reconnect',
     await canvas(traveler).evaluate((element) => {
       globalThis.travelCanvas = element
     })
-    for (const client of [page, traveler]) {
-      await expect
-        .poll(async () => (await monsterProjection(client)).monsters.map(({ monsterId, hp }) => ({ monsterId, hp })))
-        .toEqual(monsters)
-      await expect.poll(() => remote(client)).toMatchObject({ y: 848 })
-    }
+    await Promise.all(
+      [page, traveler].flatMap((client) => [
+        expect
+          .poll(async () => (await monsterProjection(client)).monsters.map(({ monsterId, hp }) => ({ monsterId, hp })))
+          .toEqual(monsters),
+        expect.poll(() => remote(client)).toMatchObject({ y: 848 }),
+      ])
+    )
 
     const finishTickSample = fixture.measureTicks()
+    enterPhase('keyboard-movement')
     const keyboardStart = await remote(traveler)
     await page.bringToFront()
     await page.getByRole('region', { name: '平台測試場' }).focus()
-    // 在入口安全側驗證延遲下的跳躍。Slime 命中會改變角色動作。
     await page.keyboard.down('ArrowLeft')
     await expect(hud(page)).toContainText('跑步 · 朝左')
     await expect.poll(async () => (await remote(traveler))?.x).toBeLessThan(keyboardStart.x - 24)
@@ -761,7 +881,21 @@ test('plays the two-browser slice at 150 ms RTT through transfer and reconnect',
     await expectObservedJump(page, traveler, keyboardStart.y, () => page.keyboard.press('Space'))
     await expect(hud(page)).toContainText('待機')
 
+    enterPhase('mobile-movement')
+    mobileTrace = await startMobileJumpTrace(
+      fixture,
+      travelerSeat(),
+      characterId,
+      traveler,
+      page,
+      testInfo,
+      browser.version(),
+      marks,
+      startedAt
+    )
+    mobileTrace.mark('before-bring-to-front')
     await traveler.bringToFront()
+    mobileTrace.mark('after-bring-to-front')
     const touch = await traveler.context().newCDPSession(traveler)
     const touchStart = await remote(page)
     async function pressTouch(name) {
@@ -777,83 +911,104 @@ test('plays the two-browser slice at 150 ms RTT through transfer and reconnect',
     await releaseTouch()
     await expect.poll(async () => (await remote(page))?.x).toBeGreaterThan(touchStart.x + 24)
     await expect(hud(traveler)).toContainText('待機')
-    await expectObservedJump(traveler, page, touchStart.y, () => pressTouch('跳躍'), releaseTouch)
+    expect(await x()).toBeLessThan(movementSmokeMaxPlayerX)
+    await expectObservedJump(
+      traveler,
+      page,
+      touchStart.y,
+      () => {
+        mobileTrace.mark('before-jump-touch', { startY: touchStart.y, thresholdY: touchStart.y - 15 })
+        return pressTouch('跳躍')
+      },
+      () => {
+        mobileTrace.mark('local-jump-observed')
+        return releaseTouch()
+      },
+      (minimum) => mobileTrace.mark('observer-poll', { minimumY: Number.isFinite(minimum) ? minimum : null })
+    )
+    await mobileTrace.beginTransfer()
     await expect(hud(traveler)).toContainText('待機')
 
+    enterPhase('m1-portal-approach')
     await traveler.getByRole('region', { name: '平台測試場' }).focus()
     await traveler.keyboard.down('ArrowUp')
-    await traveler.keyboard.down('ArrowLeft')
-    await expect.poll(predictedX, { intervals: [25] }).toBeLessThan(250)
-    await traveler.keyboard.up('ArrowLeft')
-    await expect(hud(traveler)).toContainText('待機')
-    await expect.poll(x).toBeLessThan(256)
-    expect(await x()).toBeGreaterThan(136)
-    expect(await predictedX()).toBeGreaterThan(136)
+    await approachPortal(travelerSeat(), { mapEpoch: 0, portal: 'p_to_village', min: 136, max: 256 })
     await expect(map(traveler)).toHaveText('Forest Entrance')
     expect(trips).toBe(0)
+    enterPhase('transfer-to-village')
     await traveler.keyboard.up('ArrowUp')
     await traveler.keyboard.down('KeyW')
-    await expect
-      .poll(async () => ({
-        map: await map(traveler).textContent(),
-        status: await traveler.locator('.playground-status').allTextContents(),
-        x: await x(),
-        trips,
-        arrivals: destinationSeat() ? fixture.players(destinationSeat()).length : 0,
-        errors,
-      }))
-      .toMatchObject({ map: 'Village', status: [], x: 1188, trips: 1, arrivals: 1, errors: [] })
-    await expect(count(page)).toHaveText('同房 1 人')
-    await expect(count(traveler)).toHaveText('同房 1 人')
-    await expect(scene(traveler)).toHaveAttribute('data-multiplayer-map-epoch', '1')
-    await expect(scene(traveler)).toHaveAttribute('data-remote-frame', '')
-    await expect(scene(traveler)).toHaveAttribute('data-peer-sprites', '0')
-    await expect(scene(traveler)).toHaveAttribute('data-monster-sprites', '')
-    await expect(scene(page)).toHaveAttribute('data-monster-sprites', sprites)
+    await arrivalCheckpoint({
+      map: 'Village',
+      status: [],
+      checkpointX: 1188,
+      x: 1188,
+      mapEpoch: 1,
+      revision: '2',
+      characterId,
+      trips: 1,
+      arrivals: [characterId],
+      errors: [],
+    })
+    await Promise.all([
+      expect(count(page)).toHaveText('同房 1 人'),
+      expect(count(traveler)).toHaveText('同房 1 人'),
+      expect(scene(traveler)).toHaveAttribute('data-multiplayer-map-epoch', '1'),
+      expect(scene(traveler)).toHaveAttribute('data-remote-frame', ''),
+      expect(scene(traveler)).toHaveAttribute('data-peer-sprites', '0'),
+      expect(scene(traveler)).toHaveAttribute('data-monster-sprites', ''),
+      expect(scene(page)).toHaveAttribute('data-monster-sprites', sprites),
+    ])
     expect(fixture.players(observerSeat())).not.toContain(characterId)
     expect(fixture.players(destinationSeat())).toEqual([characterId])
     expect(trips).toBe(1)
     await traveler.keyboard.up('KeyW')
 
+    enterPhase('village-reconnect')
     const villageSeat = destinationSeat()
     expect(fixture.drop(villageSeat)).toBe(true)
     await expect(traveler.getByRole('status').filter({ hasText: '正在重連' })).toBeVisible()
     expect(fixture.players(villageSeat)).toEqual([characterId])
     releaseRecovery()
-    await expect(scene(traveler)).toHaveAttribute('data-multiplayer-scene-revision', '3')
-    await expect(scene(traveler)).toHaveAttribute('data-multiplayer-character-id', characterId)
-    await expect(scene(traveler)).toHaveAttribute('data-multiplayer-map-epoch', '1')
-    await expect(map(traveler)).toHaveText('Village')
+    await arrivalCheckpoint({
+      map: 'Village',
+      roomId: villageSeat.roomId,
+      mapEpoch: 1,
+      revision: '3',
+      characterId,
+      arrivals: [characterId],
+      reconnects: 1,
+    })
     expect(fixture.players(destinationSeat())).toEqual([characterId])
     expect(destinationSeat().roomId).toBe(villageSeat.roomId)
     expect(destinationSeat().sessionId).not.toBe(villageSeat.sessionId)
     expect(reconnects).toBe(1)
 
-    await traveler.keyboard.down('ArrowLeft')
-    await expect.poll(predictedX, { intervals: [25] }).toBeLessThan(1148)
-    await traveler.keyboard.up('ArrowLeft')
-    await expect(hud(traveler)).toContainText('待機')
-    await expect.poll(x).toBeLessThan(1152)
-    expect(await x()).toBeGreaterThan(1032)
-    expect(await predictedX()).toBeGreaterThan(1032)
+    enterPhase('village-portal-approach')
+    await approachPortal(destinationSeat(), { mapEpoch: 1, portal: 'p_to_m1', min: 1032, max: 1152 })
+    enterPhase('transfer-to-m1')
     await pressTouch('進入傳送門')
-    await expect(map(traveler)).toHaveText('Forest Entrance')
+    await arrivalCheckpoint({ map: 'Forest Entrance', roomId: observerSeat().roomId, mapEpoch: 2, revision: '4', characterId, trips: 2 })
     await releaseTouch()
-    await expect(count(page)).toHaveText('同房 2 人')
-    await expect(count(traveler)).toHaveText('同房 2 人')
-    await expect(scene(traveler)).toHaveAttribute('data-multiplayer-scene-revision', '4')
-    await expect(scene(traveler)).toHaveAttribute('data-multiplayer-character-id', characterId)
-    await expect(scene(traveler)).toHaveAttribute('data-multiplayer-map-epoch', '2')
-    await expect(scene(traveler)).toHaveAttribute('data-peer-sprites', '1')
-    await expect(scene(traveler)).toHaveAttribute('data-monster-sprites', sprites)
+    await Promise.all([
+      expect(count(page)).toHaveText('同房 2 人'),
+      expect(count(traveler)).toHaveText('同房 2 人'),
+      expect(scene(traveler)).toHaveAttribute('data-multiplayer-map-epoch', '2'),
+      expect(scene(traveler)).toHaveAttribute('data-peer-sprites', '1'),
+      expect(scene(traveler)).toHaveAttribute('data-monster-sprites', sprites),
+    ])
     expect(fixture.players(observerSeat()).filter((id) => id === characterId)).toHaveLength(1)
     expect(trips).toBe(2)
 
-    expect(await traveler.evaluate(() => [...globalThis.sceneResets])).toEqual(
-      ['1', '2', '3', '4'].map((revision) => [revision, ['0', 'snap']])
-    )
-    for (const client of [page, traveler]) await expect(canvas(client)).toHaveCount(1)
-    expect(await canvas(traveler).evaluate((element) => element === globalThis.travelCanvas)).toBe(true)
+    enterPhase('final-presentation-and-metrics')
+    const [resets, sameCanvas] = await Promise.all([
+      traveler.evaluate(() => [...globalThis.sceneResets]),
+      canvas(traveler).evaluate((element) => element === globalThis.travelCanvas),
+      expect(canvas(page)).toHaveCount(1),
+      expect(canvas(traveler)).toHaveCount(1),
+    ])
+    expect(resets).toEqual(['1', '2', '3', '4'].map((revision) => [revision, ['0', 'snap']]))
+    expect(sameCanvas).toBe(true)
     expect(errors).toEqual([])
 
     const { costs, ticks, catchUpTicks, start } = finishTickSample()
@@ -888,9 +1043,22 @@ test('plays the two-browser slice at 150 ms RTT through transfer and reconnect',
         singleTickSamples: costs.length,
         tickP95Ms: percentile(costs, 0.95),
         tickP99Ms: percentile(costs, 0.99),
+        phases: marks.filter(({ kind }) => kind === 'phase').map(({ phase, tMs }) => [phase, tMs]),
         traffic,
       })
     )
+    mark('complete')
+    if (process.env.VIESMA_CAPTURE_JUMP_TRACE === '1') await mobileTrace.finish(true)
+  } catch (error) {
+    if (mobileTrace) {
+      mark('failure', {
+        phase,
+        source: fixture.movementAt(travelerSeat?.() ?? {}),
+        destination: fixture.movementAt(destinationSeat?.() ?? {}),
+      })
+      await mobileTrace.finish(true).catch((traceError) => console.warn('Could not attach the mobile jump trace', traceError.message))
+    }
+    throw error
   } finally {
     releaseRecovery()
     await traveler.close()

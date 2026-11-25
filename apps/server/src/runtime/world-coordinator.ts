@@ -22,6 +22,7 @@ import {
 import { createEncounterRewardWorker, type EncounterRewardPort } from './encounter-reward-worker.ts'
 import { createMapRuntime, type MapRuntime } from './map-runtime.ts'
 import { getMonsterSpawnDefinitions } from './monster-spawns.ts'
+import type { WatchMovement } from './movement-trace.ts'
 
 interface WorldDependencies {
   readonly clock: MonotonicClock
@@ -32,6 +33,7 @@ interface WorldDependencies {
   readonly createDestination?: (mapId: OnlineMapId) => Promise<unknown>
   readonly partyMembership?: (characterId: CharacterId) => PartyMembership | undefined
   readonly rewardPort?: EncounterRewardPort
+  readonly watchMovement?: WatchMovement
 }
 
 export interface RoomPeer {
@@ -536,7 +538,8 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
         nextId,
         monsterSpawns[mapId],
         roomId,
-        combat
+        combat,
+        dependencies.watchMovement
       )
       rooms.set(mapInstanceId, room)
       if (!stop) start()
