@@ -410,7 +410,7 @@ M5.1（`DONE`）→ 路線圖整理 → 啟動第一輪行動實機 smoke，與 
 - **Deliverables**：item／equipment definitions、loot roll policy、ground-grant model。
 - **Acceptance criteria**：同 death／owner retry 結果相同；currency 亦為 ground drop；equipment 非 stack；不向 client 暴露 seed。
 - **Required tests**：seeded rolls／probability boundary／tier reference／unique IDs／expiry clock、物品 metadata validation、level25 tier、D=0 無 roll。
-- **Status**：LOCAL_VERIFIED · [Evidence](evidence/M5.md#m52)
+- **Status**：DONE · [Evidence](evidence/M5.md#m52)
 
 ### M5.3 — 24-slot inventory 與 equipment mutations
 
