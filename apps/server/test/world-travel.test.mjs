@@ -281,7 +281,7 @@ function claim(world, room, source, candidate, token = session(source).reconnect
   return world.acceptTransfer(room, candidate, offer(source).ticket, token)
 }
 
-function rewardHarness(createCommit = (memory) => vi.fn(memory.commitReward)) {
+function rewardHarness(createCommit = (memory) => vi.fn(memory.commitReward), { party = true } = {}) {
   const data = loadGrayboxGameData()
   const tiledMaps = data.tiledMaps.map((map) =>
     map.id === 'm1'
@@ -306,7 +306,7 @@ function rewardHarness(createCommit = (memory) => vi.fn(memory.commitReward)) {
         rewardPort = { commitReward: createCommit(memory), releaseReceipt: vi.fn(memory.releaseReceipt) }
         return rewardPort
       },
-      partyMembership: (id) => ({ kind: 'party', partyId: 'shared', membershipToken: `tenure:${id}` }),
+      ...(party && { partyMembership: (id) => ({ kind: 'party', partyId: 'shared', membershipToken: `tenure:${id}` }) }),
     }
   )
   const room = h.world.createRoom()
@@ -534,6 +534,56 @@ test('settles an accepted reward after its last room is disposed without recreat
   advance()
   expect(rewardPort.releaseReceipt).toHaveBeenCalledOnce()
   expect(room.snapshot().monsters).toEqual([])
+})
+
+test('finishes a frozen reward for the transferred owner after the source room is disposed', async () => {
+  const confirmation = Promise.withResolvers()
+  const { world, room, advance, advanceTo, attack, rewardPort } = rewardHarness(
+    (memory) => vi.fn((intent) => confirmation.promise.then(() => memory.commitReward(intent))),
+    { party: false }
+  )
+  const village = world.createRoom('village')
+  const source = { ...peer(), progression: vi.fn() }
+  const candidate = { ...peer(), progression: vi.fn() }
+  world.join(room, source)
+  advanceTo(1)
+  for (let seq = 1; seq <= 4; seq++) {
+    attack(source, seq)
+    advanceTo(room.snapshot().serverTick + 18)
+  }
+  expect(room.snapshot().monsters[0].state).toBe('rewardPending')
+  await Promise.resolve()
+  expect(rewardPort.commitReward).toHaveBeenCalledOnce()
+  const [intent] = rewardPort.commitReward.mock.lastCall
+  expect(request(world, room, source)).toBe(true)
+  advanceTo(74)
+  expect(claim(world, village, source, candidate)).toBe(true)
+  advanceTo(75)
+  expect(room.player(session(source).characterId)).toBeUndefined()
+  expect(body(village, candidate)).toBeDefined()
+  world.disposeRoom(room)
+  expect(rewardPort.releaseReceipt).not.toHaveBeenCalled()
+  expect(candidate.progression).not.toHaveBeenCalled()
+  confirmation.resolve()
+  const receipt = await rewardPort.commitReward.mock.results[0].value
+  expect(receipt.recipients).toMatchObject([{ characterId: session(source).characterId, experience: 40 }])
+  for (let index = 0; index < 5; index++) await Promise.resolve()
+  advance()
+  advance()
+
+  expect(source.progression).not.toHaveBeenCalled()
+  expect(candidate.progression).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      characterId: session(source).characterId,
+      connectionEpoch: session(candidate).connectionEpoch,
+      mapEpoch: session(candidate).mapEpoch,
+      reward: expect.objectContaining({ experience: 40 }),
+    })
+  )
+  expect(rewardPort.commitReward).toHaveBeenCalledOnce()
+  expect(rewardPort.releaseReceipt).toHaveBeenCalledExactlyOnceWith(intent.claim.deathId)
+  expect(room.snapshot().monsters).toEqual([])
+  world.disposeRoom(village)
 })
 
 test('routes a stable actor through Village and M1 before either room steps, with a single private owner', () => {

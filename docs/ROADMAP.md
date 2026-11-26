@@ -1,6 +1,6 @@
 # 開發路線圖
 
-規格基線為 Task 0（2026-11-23）。正式任務由 45 項增為 46 項，新增 M5.6。目前 `DONE` 28 項（28／46，60.87%）、`NOT_STARTED` 17 項、`LOCAL_VERIFIED` 1 項、`IN_PROGRESS`／`BLOCKED` 各 0 項。進度以 `DONE` 除以正式任務總數計算，排除本次文件整理與五項風險檢查。 [協作規則](../AGENTS.md) · [驗證證據索引](evidence/README.md)
+規格基線為 Task 0（2026-11-23）。正式任務由 45 項增為 46 項，新增 M5.6。目前 `DONE` 29 項（29／46，63.04%）、`NOT_STARTED` 17 項、`LOCAL_VERIFIED`／`IN_PROGRESS`／`BLOCKED` 各 0 項。進度以 `DONE` 除以正式任務總數計算，排除本次文件整理與五項風險檢查。 [協作規則](../AGENTS.md) · [驗證證據索引](evidence/README.md)
 
 ## 1. 交付策略與 dependency graph
 
@@ -100,6 +100,8 @@ M5.1（`DONE`）→ 路線圖整理 → 啟動第一輪行動實機 smoke，與 
 
 ### 容量 spike（M5.5 後）
 
+- 2026-11-26 的容量風險檢查確認目的房銷毀 race 已修正。Stage C `VERIFIED`，同機 loopback 的 140 人／7 個 M1 房完成 600.056 秒，182 次交接及 140 次重連全部成功。M8.3 容量驗收待執行。 [回歸與複驗證據](evidence/EARLY-CAPACITY-SPIKE.md#正確性修正複驗)
+- 驗證基線、重現指令與量測結果收錄於 [Early Capacity Spike](evidence/EARLY-CAPACITY-SPIKE.md)。
 - 工具實作限一個專注開發時段。以真 Colyseus headless clients 接上正式 server 的 WorldCoordinator，逐階量測 1 房 20 人、3 房 60 人、7 房 140 人。每個可支援階段以固定條件跑 10 分鐘，包含移動、戰鬥、獎勵生成與代表性 WebSocket 流量。記錄未能啟動或跑完的階段及原因。
 - 記錄全域 world tick 執行時間 p50／p95／p99／max、各房 tick 成本、event-loop delay、積欠與補跑、CPU／RSS／heap 趨勢、GC pause、WebSocket 上下行、input／reward queue 深度與拒絕／到期／重試，以及 admission、transfer、reconnect 結果。以 tick p95 <20 ms、p99 <33.33 ms 作早期比較。
 - 記錄角色 receipt 筆數、每階段新增／重送率、角色釋放前後的保留量及 heap 趨勢。 [收據成長證據](evidence/PG-CONTRACT-SPIKE.md#收據成長與容量-spike)
@@ -445,7 +447,7 @@ M5.1（`DONE`）→ 路線圖整理 → 啟動第一輪行動實機 smoke，與 
 - **Deliverables**：reward application service、solo gameplay walkthrough、fault fixtures。
 - **Acceptance criteria**：同 death 不重複 EXP／loot；失敗無成功通知，retry 用原結果；combat 不 await repository I/O。
 - **Required tests**：failure before／after commit、lost acknowledgement、rollback、reward／AP／equip 序列、死亡後 reward 不復活、完整 solo loop replay。
-- **Status**：LOCAL_VERIFIED · [Evidence](evidence/M5.md#m55)
+- **Status**：DONE · [Evidence](evidence/M5.md#m55) · [實作 eb05fcf](https://github.com/Jacky-stc/Viesma/commit/eb05fcf923fb78b4c354363c09ed26eac6806db5) · [CI](https://github.com/Jacky-stc/Viesma/actions/runs/45699725623)
 
 ### M5.6 — Village NPC 藥水商店
 

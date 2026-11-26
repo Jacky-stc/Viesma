@@ -218,8 +218,8 @@ export async function startBrowserFixtureServer({
       if (receipt) receipt.accepted = accepted
       return accepted
     },
-    createRoom(mapId, roomId) {
-      const runtime = world.createRoom(mapId, roomId)
+    createRoom(mapId, roomId, lifecycle) {
+      const runtime = world.createRoom(mapId, roomId, lifecycle)
       if (progressionScenario || inventoryScenario || groundLootScenario || soloLoopScenario || traceMovement)
         tracedRooms.set(roomId, runtime)
       if (traceMovement) {

@@ -93,6 +93,11 @@ interface MapCombatOptions {
   readonly partyMembership?: (characterId: CharacterId) => PartyMembership | undefined
 }
 
+export interface MapRoomLifecycle {
+  canReserveIncoming(): boolean
+  setRetainedSeats(retained: boolean): void
+}
+
 export function createMapRuntime(
   mapInstanceId: MapInstanceId,
   map: NormalizedMap,
@@ -103,7 +108,8 @@ export function createMapRuntime(
   monsterSpawns?: { readonly definitions: readonly MonsterSpawnDefinition[]; readonly maxActive: number },
   roomId: string = mapInstanceId,
   combatOptions?: MapCombatOptions,
-  watchMovement?: WatchMovement
+  watchMovement?: WatchMovement,
+  lifecycle?: MapRoomLifecycle
 ) {
   const controller = createPlayerController(map)
   const rng = createSeededRng(1)
@@ -213,6 +219,8 @@ export function createMapRuntime(
   }
 
   const hasCapacity = () => !disposed && seats.size + reservations.size < mapRoomCapacity
+  const hasRetainedSeats = () => reservations.size > 0 || seats.size > bindings.size
+  const updateRetention = () => lifecycle?.setRetainedSeats(hasRetainedSeats())
 
   return {
     mapInstanceId,
@@ -220,14 +228,16 @@ export function createMapRuntime(
     map,
     player,
     hasCapacity,
-    hasRetainedSeats: () => reservations.size > 0 || seats.size > bindings.size,
+    hasRetainedSeats,
     reserve(characterId: CharacterId): boolean {
       if (!hasCapacity() || seats.has(characterId) || reservations.has(characterId)) return false
+      if (lifecycle && !lifecycle.canReserveIncoming()) return false
       reservations.add(characterId)
+      updateRetention()
       return true
     },
     cancelReservation(characterId: CharacterId): void {
-      reservations.delete(characterId)
+      if (reservations.delete(characterId)) updateRetention()
     },
     prepareArrival(
       connection: object,
@@ -252,6 +262,7 @@ export function createMapRuntime(
         seats.set(characterId, seat)
         bindings.set(connection, seat)
         state = arrival
+        updateRetention()
       }
     },
     binding(connection: object): MapRoomJoin | undefined {
@@ -326,6 +337,7 @@ export function createMapRuntime(
       seat.connected = false
       seat.frozen = false
       clearInput(seat)
+      updateRetention()
     },
     rebind(characterId: CharacterId, connection: object, nowMilliseconds: number): MapRoomJoin | undefined {
       const previous = seats.get(characterId)
@@ -335,10 +347,11 @@ export function createMapRuntime(
       seats.set(characterId, seat)
       bindings.set(connection, seat)
       clearInput(seat, true)
+      updateRetention()
       return binding
     },
     release(characterId: CharacterId): void {
-      seats.delete(characterId)
+      if (seats.delete(characterId)) updateRetention()
     },
     receive(connection: object, payload: unknown, nowMilliseconds: number): boolean {
       const actor = bindings.get(connection)

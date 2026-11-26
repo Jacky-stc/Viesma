@@ -58,7 +58,7 @@ import {
 import { createCharacterCoordinator, makeCharacterRequest, type CharacterRequest } from './character-coordinator.ts'
 import { createEncounterRewardWorker, type EncounterRewardPort } from './encounter-reward-worker.ts'
 import { createGroundLootStore, type CommittedLootRoll, type GroundLootState } from './ground-loot.ts'
-import { createMapRuntime, type MapRuntime } from './map-runtime.ts'
+import { createMapRuntime, type MapRoomLifecycle, type MapRuntime } from './map-runtime.ts'
 import { createMemoryCharacterRepository, type ConsumableEffect } from './memory-character-repository.ts'
 import { createMemoryPersonalLootRepository, type EncounterRewardReceipt } from './memory-personal-loot.ts'
 import { getMonsterSpawnDefinitions } from './monster-spawns.ts'
@@ -563,19 +563,18 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
   function prepareTransfer(route: CharacterRoute, transfer: Transfer, now: number) {
     if (transfer.creation?.status === 'pending') return
     const matching = [...rooms.values()].filter(({ map }) => map.id === transfer.mapId)
-    const destination = matching.find((room) => room.hasCapacity())
-    if (!destination) {
-      if (matching.length && (transfer.requestId !== null || transfer.creation)) {
-        return failTransfer(route, 'MAP_SEAT_UNAVAILABLE', now)
-      }
-      if (transfer.creation) return failTransfer(route, 'TRANSFER_FAILED', now)
-      transfer.creation = createMissingRoom(transfer.mapId)
-      return
-    }
     try {
-      const ticket = nextId()
-      if (!destination.reserve(route.characterId)) return failTransfer(route, 'MAP_SEAT_UNAVAILABLE', now)
+      const destination = matching.find((room) => room.reserve(route.characterId))
+      if (!destination) {
+        if (matching.length && (transfer.requestId !== null || transfer.creation)) {
+          return failTransfer(route, 'MAP_SEAT_UNAVAILABLE', now)
+        }
+        if (transfer.creation) return failTransfer(route, 'TRANSFER_FAILED', now)
+        transfer.creation = createMissingRoom(transfer.mapId)
+        return
+      }
       transfer.destination = destination
+      const ticket = nextId()
       transfer.ticket = ticket
       tickets.set(ticket, route)
       route.peer?.offer({
@@ -1005,7 +1004,7 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
     checkpoint(room: MapRuntime, connection: object) {
       if (connections.get(connection)?.room === room) return room.checkpoint(connection)
     },
-    createRoom(mapId: OnlineMapId = 'm1', roomId?: string): MapRuntime {
+    createRoom(mapId: OnlineMapId = 'm1', roomId?: string, lifecycle?: MapRoomLifecycle): MapRuntime {
       const mapInstanceId = `${bootId}:${mapId}:${++instanceSequence}` as MapInstanceId
       const room = createMapRuntime(
         mapInstanceId,
@@ -1017,7 +1016,8 @@ export function createWorldCoordinator(data: GameData, mapContentHash: string, d
         monsterSpawns[mapId],
         roomId,
         combat,
-        dependencies.watchMovement
+        dependencies.watchMovement,
+        lifecycle
       )
       rooms.set(mapInstanceId, room)
       if (!stop) start()

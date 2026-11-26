@@ -53,7 +53,13 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
     #lootRefresh = new WeakMap<Client, unknown>()
 
     onCreate(): void {
-      const runtime = world.createRoom(mapId, this.roomId)
+      const runtime = world.createRoom(mapId, this.roomId, {
+        // Colyseus 0.18.29 同時以 hasReachedMaxClients 拒絕已開始銷毀的房間。
+        canReserveIncoming: () => matchMaker.getLocalRoomById(this.roomId) === this && !this.hasReachedMaxClients(),
+        setRetainedSeats: (retained) => {
+          this.autoDispose = !retained
+        },
+      })
       this.#runtime = runtime
       this.state = new MapRoomSchema()
       updateMapRoomSchema(this.state, runtime.snapshot())
@@ -117,10 +123,7 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
       }
       if (!world.canAdmit()) throw new ServerError(ErrorCode.AUTH_FAILED, 'WORLD_TICK_BACKLOG')
       if (admission.kind === 'transfer' && world.acceptTransfer(runtime, peer, admission.ticket, admission.reconnectToken)) return
-      if (admission.kind === 'reconnect' && world.reconnect(runtime, peer, admission.reconnectToken)) {
-        this.autoDispose = !runtime.hasRetainedSeats()
-        return
-      }
+      if (admission.kind === 'reconnect' && world.reconnect(runtime, peer, admission.reconnectToken)) return
       if (admission.kind !== 'fresh' || mapId !== 'm1') throw new ServerError(ErrorCode.AUTH_FAILED, 'MAP_ADMISSION_INVALID')
       if (!world.join(runtime, peer)) throw new ServerError(ErrorCode.MATCHMAKE_INVALID_CRITERIA, 'MAP_SEAT_UNAVAILABLE')
     }
@@ -129,7 +132,6 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
       const runtime = this.#runtime
       if (!runtime) return
       world.leave(runtime, client)
-      this.autoDispose = !runtime.hasRetainedSeats()
     }
 
     onDrop(client: Client, code?: number): void {
@@ -141,13 +143,11 @@ export function createMapRoomClass(world: WorldCoordinator, version: JoinVersion
         code === CloseCode.GOING_AWAY ||
         code === CloseCode.MAY_TRY_RECONNECT
       world.leave(runtime, client, reconnectable)
-      this.autoDispose = !runtime.hasRetainedSeats()
     }
 
     onBeforePatch(): void {
       const runtime = this.#runtime
       if (!runtime) return
-      this.autoDispose = !runtime.hasRetainedSeats()
       const snapshot = runtime.snapshot()
       const previousTick = this.state.serverTick
       if (snapshot.serverTick === previousTick) return

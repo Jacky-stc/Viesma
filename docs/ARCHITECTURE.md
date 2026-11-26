@@ -243,6 +243,8 @@ Server 公告 `protocolVersion`、`balanceVersion` 與 `mapContentHash`。所有
 
 每個 MapRuntime 持有一份 map simulation，包含該房的共享怪物集合。`maxClients=20` 加上 application seat registry 的 reservation 檢查。Connection seat 與 character seat 分開計數，短暫 socket handover 不能多出第21個 character。Room key 為 `(nodeBootId, mapId, instanceSequence)`；map instance 不持久化，personal loot 另有可 rebind durable records。
 
+目的房必須仍是本機 matchmaker 登記的實例，且 Colyseus 仍可受理 transport 席位，才能預留 incoming character seat。權威預留與 grace 席位的增減同步更新 Colyseus `autoDispose`。仍有任一類保留席位時停用自動銷毀，最後一個席位在提交、取消或過期後恢復一般空房清理。預留角色席位不會在 Colyseus 建立 transport reservation。Client 仍以 `joinById` 取得 transport 席位，ticket claim 後直到交接提交才消耗權威預留。
+
 M3.4 由 WorldCoordinator 獨占角色路由，以穩定的 `characterId` 識別角色，以具體 socket 綁定及 `connectionEpoch` 驗證私有通道。MapRuntime 擁有角色席位、輸入佇列與唯一的 simulation body。預留的目的席位在交接前沒有 body 或輸入權限。同一角色每個 world tick 至多步進一次，只有當前綁定可收到 owner-only checkpoint。舊連線的輸入、離房與逾時回呼均需核對當前綁定。提交前失敗回來源，提交後從目的地恢復。
 
 1. ↑／W／觸控 ↑ 合併為單次按下邊緣。WorldCoordinator 在步進前驗證當前 socket、`mapEpoch`、request ID、存活、接地、動作及權威 AABB 交疊。目的 room 和 spawn 取自既有的 Village ↔ M1 portal。保留來源席位並清除移動輸入，待交接的 body 停在來源。
