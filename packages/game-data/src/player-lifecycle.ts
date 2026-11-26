@@ -33,7 +33,7 @@ export function loadPlayerLifecycleBalance(input: unknown): PlayerLifecycleBalan
 
 export const initialPlayerLifecycleBalance = loadPlayerLifecycleBalance({
   balanceVersion: initialBalanceVersion,
-  beginnerMaxHp: 5000,
+  beginnerMaxHp: 50,
   beginnerMaxMp: 30,
   hurtImmunityTicks: 30,
   respawnDelayTicks: 90,

@@ -102,7 +102,7 @@ function monsters(): readonly MonsterSource[] {
   return [
     {
       id: slime.id,
-      baseHp: 10,
+      baseHp: 60,
       baseAttack: 6,
       baseDefense: 1,
       baseExp: 20,
