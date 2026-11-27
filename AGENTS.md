@@ -70,3 +70,14 @@
 - 在適用的現有 checkout 作業，保留他人改動；不執行 destructive reset、未授權刪除或強制 push。
 - **不自動建立 commit 或 push**。只有使用者明確要求時才提交，且先檢視 diff 與檢查結果；subject 使用簡潔 Conventional Commit 格式。
 - 不把 credentials、token、原始密碼或 production dump 放入 repository、log 或測試 fixture。
+
+### Test Infrastructure Guidelines
+
+- Prefer existing test helpers and fixtures before introducing new ones.
+- Keep test setup explicit when ordering, timing or fault injection affects correctness.
+- Extract shared helpers only when their semantics are genuinely equivalent.
+- Every standalone test tool must have a documented execution entry point and purpose.
+- Temporary reproduction scripts should be retired after equivalent regression coverage and reproducible historical evidence are established.
+- Prefer typed test infrastructure for complex shared state and metrics.
+- Do not reduce regression coverage merely to reduce file count or lines of code.
+- Keep test and development tools outside production runtime and bundles.

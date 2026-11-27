@@ -22,7 +22,7 @@ import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { performance } from 'node:perf_hooks'
 import { setTimeout as delay } from 'node:timers/promises'
-import { observeSeats } from './capacity-audit.mjs'
+import { observeSeats } from './capacity-seats.mjs'
 
 export async function until(read, label) {
   const deadline = performance.now() + 5000
@@ -84,9 +84,8 @@ export async function startTransferFixture(createWorldCoordinator, createMapRoom
     ...world,
     createRoom(...args) {
       const runtime = world.createRoom(...args)
-      const entry = { runtime, connections: new Map(), disconnected: new Set(), incoming: new Set() }
-      rooms.set(runtime.roomId, entry)
-      observeSeats(runtime, entry, (issue) => incidents.push(issue))
+      const seats = observeSeats(runtime, (issue) => incidents.push(issue))
+      rooms.set(runtime.roomId, Object.assign(seats, { runtime }))
       const reserve = runtime.reserve
       runtime.reserve = (characterId) => {
         const result = reserve(characterId)

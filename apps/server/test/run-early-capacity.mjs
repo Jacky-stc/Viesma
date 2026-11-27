@@ -1,7 +1,3 @@
-import { matchMaker, Server } from '@colyseus/core'
-import { WebSocketTransport } from '@colyseus/ws-transport'
-import { loadGrayboxGameData, serializeMapManifest } from '@viesma/game-data'
-import { mapRoomName, PROTOCOL_VERSION, villageMapRoomName } from '@viesma/protocol'
 import { Buffer } from 'node:buffer'
 import { fork } from 'node:child_process'
 import console from 'node:console'
@@ -14,19 +10,6 @@ import { clearInterval, setInterval } from 'node:timers'
 import { setTimeout as delay } from 'node:timers/promises'
 import { URL } from 'node:url'
 import { parseArgs } from 'node:util'
-import { createAudit, observeSeats } from './capacity-audit.mjs'
-import {
-  count,
-  counters,
-  createRoomMetrics,
-  distribution,
-  findAuthorizedInFlight,
-  installObserver,
-  matchesOwner,
-  observePrivateWrite,
-  privateMessages,
-  record,
-} from './capacity-observe.mjs'
 
 const { values } = parseArgs({
   options: {
@@ -37,17 +20,47 @@ const { values } = parseArgs({
     output: { type: 'string' },
   },
 })
-const roomCount = { A: 1, B: 3, C: 7 }[values.stage]
+const { stage, output } = values
 const seconds = Number(values.seconds)
 const warmup = Number(values.warmup)
-if (!roomCount || !Number.isSafeInteger(seconds) || seconds < 1 || !Number.isSafeInteger(warmup) || warmup < 0) {
-  throw new Error('Usage: node apps/server/test/run-early-capacity.mjs --stage A|B|C [--seconds 600] [--warmup 15] [--output path]')
+if (
+  (stage !== 'A' && stage !== 'B' && stage !== 'C') ||
+  !Number.isSafeInteger(seconds) ||
+  seconds < 1 ||
+  !values.warmup.trim() ||
+  !Number.isSafeInteger(warmup) ||
+  warmup < 0 ||
+  (output !== undefined && (!output.trim() || output.includes('\0')))
+) {
+  throw new Error(
+    'Usage: node apps/server/test/run-early-capacity.mjs --stage A|B|C [--seconds 600] [--warmup 15] [--seed seed] [--output path]'
+  )
 }
-if (values.output) writeFileSync(values.output, '')
+const roomCount = { A: 1, B: 3, C: 7 }[stage]
+
+const { matchMaker, Server } = await import('@colyseus/core')
+const { WebSocketTransport } = await import('@colyseus/ws-transport')
+const { loadGrayboxGameData, serializeMapManifest } = await import('@viesma/game-data')
+const { mapRoomName, PROTOCOL_VERSION, villageMapRoomName } = await import('@viesma/protocol')
+const { createAudit } = await import('./capacity-audit.mjs')
+const {
+  count,
+  counters,
+  createRoomMetrics,
+  distribution,
+  findAuthorizedInFlight,
+  installObserver,
+  matchesOwner,
+  observePrivateWrite,
+  privateMessages,
+  record,
+} = await import('./capacity-observe.mjs')
+
+if (output) writeFileSync(output, '')
 function log(kind, data) {
   const line = JSON.stringify({ kind, ...data })
-  if (values.output) appendFileSync(values.output, line + '\n')
-  if (kind !== 'sample' || !values.output) console.log(line)
+  if (output) appendFileSync(output, line + '\n')
+  if (kind !== 'sample' || !output) console.log(line)
 }
 
 const errors = counters()
@@ -241,11 +254,10 @@ const observedWorld = {
   ...world,
   createRoom(...args) {
     const runtime = world.createRoom(...args)
-    const metrics = createRoomMetrics(runtime)
+    const metrics = createRoomMetrics(runtime, incident)
     worldMetrics.rooms.set(runtime.mapInstanceId, metrics)
     runtimes.set(runtime.roomId, runtime)
     historicalRooms.push(metrics)
-    observeSeats(runtime, metrics, incident)
     const advance = runtime.advance
     runtime.advance = (...args) => {
       const start = performance.now()
@@ -489,7 +501,7 @@ try {
   await server.listen(0, '127.0.0.1')
   const address = 'http://127.0.0.1:' + transport.server.address().port
   log('environment', {
-    stage: values.stage,
+    stage,
     clients: roomCount * 20,
     combatRooms: roomCount,
     seconds,

@@ -140,17 +140,14 @@ M1 每房 tick p50／p95／p99／max 為 0.307／0.653／0.944／3.142 ms。10 H
 
 重跑未再看到初次的 checkpoint 訊號。這次停止事件同時出現席位／可用性不一致、portal 目的 admission 522 及來源 `TRANSFER_FAILED`。以兩個真實 SDK client 和正式 Room、WorldCoordinator 重現相同的 admission／transfer 結果。診斷程式固定權威 tick 次序，只定位兩個角色到既有 portal，沿用同一地圖資料、預留與 Colyseus 清理路徑。
 
-```sh
-pnpm run build
-node apps/server/test/reproduce-capacity-transfer.mjs
-```
+基線與逐事件 trace 的重現步驟見 [從 Git 歷史重現](#從-git-歷史重現)。
 
 1. 依序從 M1 建立甲、乙；甲進 Village 成為唯一住客。等 Colyseus 的空房計時序列已可釋放房間。
 2. 甲準備回 M1，已連到候選 socket。乙排入進 Village 的正常 portal 請求。
 3. 推進同一 tick。甲先交接到 M1，舊 Village socket 觸發 `onLeave`，當時 Village 未保有權威席位。乙接著成功預留該 Village 並收到 offer。
 4. Colyseus 在等待中的 leave 清理流程檢查空房時釋放 Village。測試在 `disposeRoom` 當下測得 `hasRetainedSeats() === true`，乙的真實 `joinById` 回 `522 room not found`。下一 tick 回報 `TRANSFER_FAILED`，乙仍保有原 M1 body。獨立執行兩次都得到相同結果。
 
-最小修正建議是在目的 MapRuntime 成功預留時，同步更新對應 Colyseus Room 的保留狀態，並在 reservation 消耗或取消時重算。讓同 tick 的離房清理能看到新 reservation，補上上述雙 client 回歸。此問題在兩人就可重現，第一個可證實的阻擋因素是兩個 room lifecycle 的時序；Stage C 截止前未碰到取樣的 tick、網路或 reward backlog 門檻。 [決定性重現程式](../../apps/server/test/reproduce-capacity-transfer.mjs) · [權威預留](../../apps/server/src/runtime/world-coordinator.ts) · [Colyseus Room adapter](../../apps/server/src/adapters/map-room.ts)
+最小修正建議是在目的 MapRuntime 成功預留時，同步更新對應 Colyseus Room 的保留狀態，並在 reservation 消耗或取消時重算。讓同 tick 的離房清理能看到新 reservation，補上上述雙 client 回歸。此問題在兩人就可重現，第一個可證實的阻擋因素是兩個 room lifecycle 的時序；Stage C 截止前未碰到取樣的 tick、網路或 reward backlog 門檻。 [決定性重現程式](#從-git-歷史重現) · [權威預留](../../apps/server/src/runtime/world-coordinator.ts) · [Colyseus Room adapter](../../apps/server/src/adapters/map-room.ts)
 
 ## 正確性修正複驗
 
@@ -165,9 +162,44 @@ node apps/server/test/reproduce-capacity-transfer.mjs
 
 Colyseus core 0.18.29 的 `hasReachedMaxClients()` 會同時檢查 transport 容量和 `DISPOSING`。目的房預留前檢查此方法及本機 matchmaker 實例身分。MapRuntime 在 incoming 加入、成功交接、取消、過期，以及 grace 保留增減時同步更新 `autoDispose`。候選 socket claim 時仍由來源房持有角色 body。交接提交才將 incoming 換成 active，並撤銷舊綁定。取消、逾時、候選失敗或來源斷線均清理預留。最後一筆保留席位釋放時，Colyseus 恢復內建空房清理。Transport 仍透過 `joinById` 暫留自己的席位，沒有預先配置第二份 transport reservation。 [房間契約](../ARCHITECTURE.md#6-map-authoringroom-與-transfer)
 
-正式產物的雙 client 重現連跑 5 次，全部在 tick 5 經 `TransferOffer` 取得目的 socket，在 tick 6 提交。觀察到新預留當下 `autoDispose=false`、incoming 1、transport client／reservation 均 0。隨後核對同一角色只剩目的 body、舊綁定不能取得私人 checkpoint／背包／地面掉落、Village 真正清空後銷毀。5 次皆無意外 522。 [雙 client 重現](../../apps/server/test/reproduce-capacity-transfer.mjs) · [生命週期測試](../../apps/server/test/transfer-lifecycle.test.mjs)
+正式產物的雙 client 重現連跑 5 次，全部在 tick 5 經 `TransferOffer` 取得目的 socket，在 tick 6 提交。觀察到新預留當下 `autoDispose=false`、incoming 1、transport client／reservation 均 0。隨後核對同一角色只剩目的 body、舊綁定不能取得私人 checkpoint／背包／地面掉落、Village 真正清空後銷毀。5 次皆無意外 522。 [雙 client 重現](#從-git-歷史重現) · [生命週期測試](../../apps/server/test/transfer-lifecycle.test.mjs)
 
-目前雙 client 重現入口預設驗證修正版。要對基線再次取得逐事件 trace，將該入口與 `transfer-lifecycle-fixture.mjs` 複製至基線 server 的測試目錄，對基線 production build 執行 `node apps/server/test/reproduce-capacity-transfer.mjs --baseline`。
+### 從 Git 歷史重現
+
+使用 Node.js 24.22.3 與 pnpm 11.19.0，從 repository 根目錄執行。正式伺服器取自基線 `eb05fcf923fb78b4c354363c09ed26eac6806db5`。重現入口及完整相依檔案固定取自 `9e8dbb953943300e74045ddafb5cd54d051308bc`，依賴使用基線的 frozen lockfile。
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $true
+$traceRoot = Join-Path $env:TEMP ('viesma-transfer-repro-' + [Guid]::NewGuid().ToString('N'))
+$baselineRoot = Join-Path $traceRoot 'baseline'
+New-Item -ItemType Directory -Path $baselineRoot -Force | Out-Null
+$baseline = 'eb05fcf923fb78b4c354363c09ed26eac6806db5'
+$harness = '9e8dbb953943300e74045ddafb5cd54d051308bc'
+$baselineArchive = Join-Path $traceRoot 'baseline.tar'
+$fixtureArchive = Join-Path $traceRoot 'transfer-harness.tar'
+git archive --format=tar --output=$baselineArchive $baseline
+tar -xf $baselineArchive -C $baselineRoot
+git archive --format=tar --output=$fixtureArchive $harness -- `
+  apps/server/test/reproduce-capacity-transfer.mjs `
+  apps/server/test/transfer-lifecycle-fixture.mjs `
+  apps/server/test/capacity-audit.mjs `
+  apps/server/test/capacity-observe.mjs
+tar -xf $fixtureArchive -C $baselineRoot
+Push-Location $baselineRoot
+try {
+  pnpm install --frozen-lockfile
+  pnpm run build
+  node apps/server/test/reproduce-capacity-transfer.mjs --baseline |
+    Tee-Object -FilePath (Join-Path $traceRoot 'transfer-baseline.json')
+} finally {
+  Pop-Location
+}
+```
+
+如需對照修正版，另將 `$harness` 完整匯出到新的隔離目錄，依同一流程安裝並建置。以 `node apps/server/test/reproduce-capacity-transfer.mjs` 執行，輸出另存為 `transfer-fixed.json`。
+
+2026-11-27 於隔離目錄驗證兩個固定版本。基線在 tick 5 銷毀保留中的目的房，SDK 回 522，來源收到 `TRANSFER_FAILED` 且保留原 M1 body。修正版在 tick 6 完成交接，`unexpected522=0`。重現 CLI 由 Git 歷史保存，CI 使用真 SDK 的正式轉場回歸。 [歷史入口](https://github.com/Jacky-stc/Viesma/blob/9e8dbb953943300e74045ddafb5cd54d051308bc/apps/server/test/reproduce-capacity-transfer.mjs) · [正式回歸](../../apps/server/test/transfer-lifecycle.test.mjs)
 
 ### 回歸檢查
 
@@ -223,6 +255,8 @@ pnpm exec playwright test tests/smoke/multiplayer.spec.mjs --workers=1 --grep 't
 
 Stage C 完成並關閉後，在同一台 Windows 11 主機與正式資料的隔離 build 單獨執行 `pnpm run test:acceptance:m4.5`，使用 Node.js 24.22.3／pnpm 11.19.0。600.040 秒、17,999 ticks、兩房共 4 具角色 body，M1 10／12 隻怪。完成 26 輪角色死亡返村、怪物死亡重生與 Return reset，包含 30 次 fresh join、26 次主動離房和 26 次重連。26 筆獎勵提交並釋放收據，完成 26 次拾取。補跑 3,629 ticks，單次 wake 最多 2 ticks，積欠峰值、結束積欠、待處理意圖及保留收據均為 0。最後一房清理後排程器停止，程序錯誤 0。這項耐久命令使用 runtime peer，真實 transport 生命週期由上述 SDK、Chromium 與 Stage C 測試驗證。 [M4.5 原驗收](M4.md#m45) · [耐久入口](../../apps/server/test/run-shared-combat-endurance.mjs)
 
+容量量測工具維護複核（2026-11-27）。三份既有 Stage C JSONL 中，共檢查 28,614 個 `activePeak`、`reservedPeak`、`seatsPeak` 值，均為有限數值。Stage C runner 在這些量測時已將峰值初始化為零。缺少初始化的呼叫端是獨立轉場測試夾具，未影響上述 Stage C 結果。 [共用席位觀察器](../../apps/server/test/capacity-seats.mjs)
+
 ## 保留量與後續驗收
 
 - 角色命令收據被角色 lease 保留，角色釋放後回到 0。Encounter 收據隨 encounter 釋放。Ground store 將拾取與到期寫成終態，角色與房間釋放後仍保有 `records`。在這段 workload 裡，地面終態的累積比活躍地面件數更能反映長時間記憶體壓力。RSS 與 V8 heap 也包含 schema、socket、觀察程式和 GC 高水位，不能由收據 JSON 大小換算。 [角色 repository](../../apps/server/src/runtime/memory-character-repository.ts) · [地面 store](../../apps/server/src/runtime/ground-loot.ts)
@@ -248,4 +282,13 @@ pnpm run build
 - Stage C 訊息探針修正後，五個 harness 檔的 ESLint／Prettier 通過，含撤銷邊界的新斷言、WorldCoordinator 交接與 Colyseus 房間測試共 30／30。Stage C 重跑使用 `node apps/server/test/run-early-capacity.mjs --stage C --output stage-c-recheck.jsonl`。
 - Stage C 初次嘗試與重跑保留原始 JSONL，包括 435 秒停止後的 drain／teardown。另以 Windows PTY Ctrl+C 中斷短程 Stage A，主控台終止程序群組後未留下 server、load process 或 loopback listen socket。PTY 終止只驗證程序與埠回收；一般結束及正確性中止另有完整 drain 紀錄。
 
-交付包含階段執行入口、headless client、tick／傳輸觀察器、seat／交易稽核、focused tests 及雙 client 重現程式。正式 server 與 game-data 透過已驗證的 SHA 產出。 [階段入口](../../apps/server/test/run-early-capacity.mjs) · [Headless client](../../apps/server/test/capacity-client.mjs) · [觀察器](../../apps/server/test/capacity-observe.mjs) · [稽核](../../apps/server/test/capacity-audit.mjs) · [Focused tests](../../apps/server/test/early-capacity.test.mjs) · [轉場重現](../../apps/server/test/reproduce-capacity-transfer.mjs)
+交付包含階段執行入口、headless client、tick／傳輸觀察器、seat／交易稽核、focused tests 及雙 client 重現程式。正式 server 與 game-data 透過已驗證的 SHA 產出。 [階段入口](../../apps/server/test/run-early-capacity.mjs) · [Headless client](../../apps/server/test/capacity-client.mjs) · [觀察器](../../apps/server/test/capacity-observe.mjs) · [稽核](../../apps/server/test/capacity-audit.mjs) · [Focused tests](../../apps/server/test/early-capacity.test.mjs) · [轉場重現](#從-git-歷史重現)
+
+## 2026-11-27 測試工具維護複驗
+
+隔離副本使用 Windows 11 build 26200、Node.js 24.22.3、pnpm 11.19.0、Vitest 5.1.1、Playwright 1.65.1 與 Chromium 159.0.8154.6。依賴以 frozen lockfile 從本機 store 安裝。
+
+- `pnpm exec vitest run apps/server/test/early-capacity.test.mjs apps/server/test/transfer-lifecycle.test.mjs` 通過 26／26，包含席位峰值序列化及 CLI 對輸出路徑的副作用回歸。`pnpm run test` 通過 42 檔、628／628。
+- `pnpm run typecheck`、`pnpm run lint`、`pnpm run format:check`、`pnpm run check:boundaries`、`pnpm run build` 及 `git diff --check` 通過。格式檢查使用 Git 原始 LF 位元組，修正 Windows archive 副本的 CRLF 轉換。正式產物檢查涵蓋 client 16 檔與 server 13 檔，client 的發布資產為三張既有圖集和署名。
+- 無 app 或 package `dist/` 的隔離目錄，使用 `VIESMA_PARALLAX_PORT=4298`、`VIESMA_PARALLAX_HARDWARE=1` 執行 `pnpm run test:visual --reporter=line`，13／13 通過。正式建置的多人 smoke 以 2698 埠、單 worker 執行 `through transfer and reconnect|through rejoin and reconnect|delayed destination join|across reconnect and transfer`，5／5 通過。
+- `node apps/server/test/run-early-capacity.mjs --stage A --seconds 8 --warmup 0 --output stage-a-metrics-probe.jsonl` 量測 8.094 秒。成功入房的 20 人皆有唯一權威 body，18 個序列化峰值皆為 0 至 20 的整數，清理後連線數為零。短樣本依原驗收門檻回 `INCONCLUSIVE`、exit 1。未重跑 600 秒容量及耐久驗收。

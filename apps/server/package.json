@@ -6,7 +6,7 @@
     "dev": "pnpm -w run build:shared && pnpm run dev:serve",
     "dev:serve": "node --watch src/index.ts",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test-tools.json",
     "build": "tsc"
   },
   "dependencies": {

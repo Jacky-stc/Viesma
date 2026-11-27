@@ -9,6 +9,7 @@ import { createFixedTickDriver as fixedDriver, step as simulationStep } from '@v
 import { registerHooks } from 'node:module'
 import { createHistogram, performance } from 'node:perf_hooks'
 import { URL } from 'node:url'
+import { observeSeats } from './capacity-seats.mjs'
 
 export * from '@viesma/simulation'
 
@@ -172,8 +173,8 @@ export function step(state, commands, dt, context) {
   return result
 }
 
-export function createRoomMetrics(runtime) {
-  return {
+export function createRoomMetrics(runtime, incident) {
+  return Object.assign(observeSeats(runtime, incident), {
     roomId: runtime.roomId,
     mapId: runtime.map.id,
     tickCost: createHistogram(),
@@ -182,17 +183,11 @@ export function createRoomMetrics(runtime) {
     events: counters(),
     input: counters(),
     network: counters(),
-    connections: new Map(),
-    disconnected: new Set(),
-    incoming: new Set(),
     liveMonsters: 0,
     monsters: 0,
     inputDepth: 0,
     queuedInputs: 0,
     queuedInputsPeak: 0,
-    activePeak: 0,
-    reservedPeak: 0,
-    seatsPeak: 0,
     bufferedPeak: 0,
-  }
+  })
 }
