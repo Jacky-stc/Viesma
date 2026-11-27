@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "atlases": [
+    {
+      "id": "forest-terrain-atlas",
+      "type": "atlas",
+      "source": "images/forest-terrain-atlas.png",
+      "output": "game-assets/forest-terrain-atlas.png",
+      "sha256": "8dc974119e42ebbbc0b07d71ce187044a6735f526dd8715df92170060df4eb31",
+      "width": 108,
+      "height": 108,
+      "optionalInDevelopment": true,
+      "rights": {
+        "kind": "original",
+        "license": "project-owned",
+        "creator": "Viesma 專案擁有者",
+        "attribution": "Viesma · Forest Entrance",
+        "evidence": "provenance/forest-entrance.md",
+        "generator": "slice-forest-terrain.py"
+      },
+      "sprites": [
+        {
+          "id": "forest-ground-left",
+          "type": "tile",
+          "renderWidth": 32,
+          "renderHeight": 32,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 2,
+                  "y": 2,
+                  "width": 32,
+                  "height": 32
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        },
+        {
+          "id": "forest-ground-middle",
+          "type": "tile",
+          "renderWidth": 32,
+          "renderHeight": 32,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 38,
+                  "y": 2,
+                  "width": 32,
+                  "height": 32
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        },
+        {
+          "id": "forest-ground-right",
+          "type": "tile",
+          "renderWidth": 32,
+          "renderHeight": 32,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 74,
+                  "y": 2,
+                  "width": 32,
+                  "height": 32
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        },
+        {
+          "id": "forest-platform-left",
+          "type": "tile",
+          "renderWidth": 32,
+          "renderHeight": 32,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 2,
+                  "y": 38,
+                  "width": 32,
+                  "height": 32
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        },
+        {
+          "id": "forest-platform-middle",
+          "type": "tile",
+          "renderWidth": 32,
+          "renderHeight": 32,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 38,
+                  "y": 38,
+                  "width": 32,
+                  "height": 32
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        },
+        {
+          "id": "forest-platform-right",
+          "type": "tile",
+          "renderWidth": 32,
+          "renderHeight": 32,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 74,
+                  "y": 38,
+                  "width": 32,
+                  "height": 32
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        },
+        {
+          "id": "forest-soil",
+          "type": "tile",
+          "renderWidth": 32,
+          "renderHeight": 32,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 2,
+                  "y": 74,
+                  "width": 32,
+                  "height": 32
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        },
+        {
+          "id": "forest-bottom-left",
+          "type": "tile",
+          "renderWidth": 32,
+          "renderHeight": 32,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 38,
+                  "y": 74,
+                  "width": 32,
+                  "height": 32
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        },
+        {
+          "id": "forest-bottom-right",
+          "type": "tile",
+          "renderWidth": 32,
+          "renderHeight": 32,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 74,
+                  "y": 74,
+                  "width": 32,
+                  "height": 32
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

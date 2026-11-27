@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "atlases": [
+    {
+      "id": "forest-organic-terrain-atlas",
+      "type": "atlas",
+      "source": "images/forest-organic-terrain-atlas.png",
+      "output": "game-assets/forest-organic-terrain-atlas.png",
+      "sha256": "0c2dd19bed6eb2f65821e81a7db24ae6920d8d630d315bf506a66f4ea450ee0d",
+      "width": 1339,
+      "height": 727,
+      "optionalInDevelopment": true,
+      "rights": {
+        "kind": "original",
+        "license": "project-owned",
+        "creator": "Viesma 專案擁有者",
+        "attribution": "Viesma · Forest Entrance",
+        "evidence": "provenance/forest-entrance.md",
+        "generator": "slice-forest-organic-terrain.py"
+      },
+      "sprites": [
+        {
+          "id": "forest-organic-ground-left",
+          "type": "tile",
+          "renderWidth": 205,
+          "renderHeight": 164,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 2,
+                  "y": 2,
+                  "width": 436,
+                  "height": 348
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        },
+        {
+          "id": "forest-organic-ground-right",
+          "type": "tile",
+          "renderWidth": 201,
+          "renderHeight": 158,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 442,
+                  "y": 2,
+                  "width": 428,
+                  "height": 337
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        },
+        {
+          "id": "forest-organic-thick-left",
+          "type": "tile",
+          "renderWidth": 67,
+          "renderHeight": 71,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 874,
+                  "y": 2,
+                  "width": 231,
+                  "height": 246
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        },
+        {
+          "id": "forest-organic-thick-right",
+          "type": "tile",
+          "renderWidth": 63,
+          "renderHeight": 70,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 1109,
+                  "y": 2,
+                  "width": 218,
+                  "height": 241
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        },
+        {
+          "id": "forest-organic-ground-middle",
+          "type": "tile",
+          "renderWidth": 433,
+          "renderHeight": 87,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 2,
+                  "y": 354,
+                  "width": 922,
+                  "height": 186
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        },
+        {
+          "id": "forest-organic-thick-middle",
+          "type": "tile",
+          "renderWidth": 119,
+          "renderHeight": 55,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 928,
+                  "y": 354,
+                  "width": 409,
+                  "height": 188
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        },
+        {
+          "id": "forest-organic-thin-left",
+          "type": "tile",
+          "renderWidth": 58,
+          "renderHeight": 47,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 2,
+                  "y": 546,
+                  "width": 225,
+                  "height": 179
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        },
+        {
+          "id": "forest-organic-thin-middle",
+          "type": "tile",
+          "renderWidth": 55,
+          "renderHeight": 26,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 231,
+                  "y": 546,
+                  "width": 212,
+                  "height": 100
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        },
+        {
+          "id": "forest-organic-thin-right",
+          "type": "tile",
+          "renderWidth": 54,
+          "renderHeight": 37,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 447,
+                  "y": 546,
+                  "width": 208,
+                  "height": 144
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": true
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

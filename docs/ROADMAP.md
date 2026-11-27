@@ -2,6 +2,8 @@
 
 規格基線為 Task 0（2026-11-23）。正式任務由 45 項增為 46 項，新增 M5.6。目前 `DONE` 29 項（29／46，63.04%）、`NOT_STARTED` 17 項、`LOCAL_VERIFIED`／`IN_PROGRESS`／`BLOCKED` 各 0 項。進度以 `DONE` 除以正式任務總數計算，排除本次文件整理與五項風險檢查。 [協作規則](../AGENTS.md) · [驗證證據索引](evidence/README.md)
 
+Visual Foundation 另列於正式進度之外。VF.1 `LOCAL_VERIFIED`，涵蓋 Forest Entrance 專用的開發預覽、實驗圖層及原始素材稽核。VF.2 `LOCAL_VERIFIED`，保留為矩形地形與 L5 的比較基線。VF.2.1b `LOCAL_VERIFIED`，已取得使用者視覺驗收，地形修整延後。VF.3.1 `LOCAL_VERIFIED`，保留 Character Master 比較模式。VF.3.2a `LOCAL_VERIFIED`，使用者已確認 Base Body 比例，預設高度定為 80 world units。VF.3.2b `LOCAL_VERIFIED`，使用者已確認動畫契約。VF.3.3a `LOCAL_VERIFIED`，使用者已完成 Idle 呼吸動畫視覺驗收，預設播放速率為 0.5x。VF.3.3b `LOCAL_VERIFIED`，Paper Doll 診斷圖層待視覺驗收。VF.3.4a.1 `LOCAL_VERIFIED`，Face 01 暫定校正與外觀連續性待再次視覺驗收。 [VF.3.3b 驗證](evidence/VF3.md#vf33b-paper-doll-layer-renderer) · [VF.3.4a.1 驗證](evidence/VF3.md#vf34a1-face-01-校正與外觀連續性) · [VF.3.3a 驗證](evidence/VF3.md#vf33a-deterministic-idle-recovery) · [Visual Foundation](VISUAL_FOUNDATION.md) · [VF.1 驗證](evidence/VF1.md) · [VF.2 驗證](evidence/VF2.md) · [VF.2.1b 驗證](evidence/VF2.1.md) · [VF.3.1 驗證](evidence/VF3.md) · [VF.3.2a／b 驗證](evidence/VF3.md#vf32a-驗收及-vf32b-契約)
+
 ## 1. 交付策略與 dependency graph
 
 Task ID 固定。圖中每條箭頭對應正式任務的直接 Dependencies，前置任務須完成並驗證。M3 以 Village／M1 graybox 提早驗證多人連線。每項 Required tests 是該任務的必要檢查。

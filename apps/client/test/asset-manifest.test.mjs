@@ -52,6 +52,39 @@ describe('registered assets', () => {
     expect(() => buildAssetCatalog(input, root, true)).toThrow(expect.objectContaining({ code: 'MISSING_FILE' }))
   })
 
+  test('preserves valid Paper Doll draw order and rejects duplicate, unknown or missing body slots', () => {
+    const development = JSON.parse(readFileSync(join(root, 'experimental-character.json'), 'utf8'))
+    const { idlePose } = development.atlases.find(({ id }) => id === 'beginner-base-body-idle-atlas').sprites[0]
+    const frame = idlePose.clips.idle.frames[0]
+    frame.drawOrder = ['backHair', 'baseBody', 'frontHair', 'face']
+    const { catalog } = buildAssetCatalog(input, root, true, development)
+    expect(indexSprites(catalog).get(visualIds.beginnerIdle).sprite.idlePose.frames[0].drawOrder).toEqual(frame.drawOrder)
+    for (const order of [['baseBody', 'baseBody'], ['baseBody', 'unknown'], ['face']]) {
+      frame.drawOrder = order
+      expect(() => buildAssetCatalog(input, root, true, development)).toThrow(expect.objectContaining({ code: 'INVALID_MANIFEST' }))
+    }
+  })
+
+  test('validates the Face 01 anchor and keeps its atlas out of the production manifest', () => {
+    const development = JSON.parse(readFileSync(join(root, 'experimental-character.json'), 'utf8'))
+    const atlas = development.atlases.find(({ id }) => id === 'beginner-face-01-atlas')
+    const { attachedFace } = atlas.sprites[0]
+    expect(
+      indexSprites(buildAssetCatalog(input, root, true, development).catalog).get('beginner-face-01').sprite.attachedFace.defaultCalibration
+    ).toEqual({ xPx: 5.5, yPx: 27.5, scale: 1.3 })
+    attachedFace.defaultCalibration.xPx = 5.25
+    expect(() => buildAssetCatalog(input, root, true, development)).toThrow(expect.objectContaining({ code: 'INVALID_MANIFEST' }))
+    attachedFace.defaultCalibration.xPx = 5.5
+    expect(loadProjectAssets().catalog.atlases.some(({ id }) => id === atlas.id)).toBe(false)
+    expect(() => buildAssetCatalog({ ...input, atlases: [...input.atlases, atlas] }, root)).toThrow(
+      expect.objectContaining({ code: 'INVALID_MANIFEST' })
+    )
+    attachedFace.originPx.x++
+    expect(() => buildAssetCatalog(input, root, true, development)).toThrow(expect.objectContaining({ code: 'INVALID_REFERENCE' }))
+    attachedFace.poseVersion++
+    expect(() => buildAssetCatalog(input, root, true, development)).toThrow(expect.objectContaining({ code: 'INVALID_MANIFEST' }))
+  })
+
   test.each([
     [
       'duplicate atlas ID',

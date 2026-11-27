@@ -62,3 +62,7 @@ Manifest 驗證目的地、出生點 ID、反向關係與從 Village 出發的�
 圖層的 GID 使用 uint32。扣除最高四位再依 `firstgid` 找 tileset 和 local tile ID。H、V、D flags 個別保留，繪製時先套用 D，再套用 H、V。第 29 位是 Tiled 可能殘留的六角格旗標，orthogonal 圖中清除。有效 GID 須落在外部 atlas 的 tile 範圍。參考 [Tiled Global Tile IDs](https://doc.mapeditor.org/en/stable/reference/global-tile-ids/)。
 
 不支援 TMX／TSX XML、非 orthogonal、infinite／chunks、base64／壓縮圖層、group／image layer、嵌入或 image-collection tileset、tile animation／每 tile 碰撞、非預設 offset／parallax／blend、物件旋轉、template、tile object、text、ellipse、capsule、polygon、polyline，以及表外的自訂屬性。其餘未知欄位會報錯。測試使用 [小型匯出 fixtures](../packages/game-data/test/fixtures/tiled)，含自製雙色 tile 圖與故意錯誤的 atlas 設定。
+
+VF.2 提供可由既有匯入器讀取的 32 px、3 × 3 外部 tileset，`margin=2`、`spacing=4`。Forest Entrance 的既有碰撞含 off-grid X/Y 與 12／24 world units 薄面，實驗模式以 client 的圖塊矩形裁切對齊這些座標。同一 Tiled 地圖匯出繼續供遊戲、預覽與伺服器使用。 [實驗 tileset](../content/assets/images/forest-terrain.tsj) · [Visual Foundation](VISUAL_FOUNDATION.md)
+
+VF.2.1b 的 client 自然地形依主地板 ID、實體或單向碰撞類型挑選部件，對齊原有上緣與水平跨度。來源區域和接點由開發 atlas 管線管理，Tiled 地圖持續提供碰撞、傳送、出生和巡邏資料。 [部件座標](../apps/client/src/rendering/forest-organic-terrain-slices.json) · [VF.2.1b 驗證](evidence/VF2.1.md)

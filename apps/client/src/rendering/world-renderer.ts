@@ -1,13 +1,20 @@
+import type { WorldPoint } from '@viesma/domain'
 import type { GuideDefinition, NormalizedMap } from '@viesma/game-data'
 import type { CombatDamage, GroundLootView } from '@viesma/protocol'
-import { Application, Container, Graphics, Text } from 'pixi.js'
+import { Application, Container, Graphics, Text, type WebGLRenderer } from 'pixi.js'
 import catalog from 'virtual:viesma-assets'
 import { createAtlasScope } from './assets/atlas-scope'
-import { indexSprites } from './assets/catalog'
+import { face01SpriteId, indexSprites, visualIds } from './assets/catalog'
+import { diagnosticSpriteId, type PaperDollLayers } from './assets/paper-doll-view'
 import { createBeginnerView, createMapSpriteView, createSharedMonsterView, type MonsterVisualFrame } from './assets/sprite-views'
-import { followCamera, type ViewportSize } from './camera'
+import { followCamera, viewportScale, type ViewportSize } from './camera'
+import { characterPreviewModes, type CharacterPreviewRef } from './character-preview'
+import { experimentalMapParallax, forestForegroundBands, organicForestParallax } from './forest-parallax'
+import { createForestTerrainView, type ForestRenderMode } from './forest-terrain'
+import type { ParallaxLayer } from './parallax-layout'
+import { createParallaxRenderer, type ParallaxStats } from './parallax-renderer'
 import type { PlayerVisualFrame } from './player-view'
-import { drawTerrain, worldColors } from './world-graphics'
+import { drawCollisionOverlay, drawTerrain, worldColors } from './world-graphics'
 
 const sprites = indexSprites(catalog)
 
@@ -16,8 +23,18 @@ interface PlayerSize {
   readonly height: number
 }
 
+interface ParallaxPreviewView {
+  readonly origin: WorldPoint
+  readonly zoom: number
+  readonly layers: readonly ParallaxLayer[]
+  readonly mode: ForestRenderMode
+  readonly showCollision: boolean
+}
+
 export interface WorldRenderer {
   resetRoom(): void
+  parallaxStats(): ParallaxStats | undefined
+  terrainStats(): { readonly decodedBytes: number; readonly cells: number } | undefined
   render(
     frame: PlayerVisualFrame & {
       readonly map: NormalizedMap
@@ -26,7 +43,8 @@ export interface WorldRenderer {
       readonly monsters?: ReadonlyMap<string, MonsterVisualFrame>
       readonly damage?: readonly (CombatDamage & { readonly progress: number })[]
       readonly groundLoot?: ReadonlyMap<string, GroundLootView> | undefined
-    }
+    },
+    preview?: ParallaxPreviewView
   ): void
 }
 
@@ -50,10 +68,18 @@ export async function createWorldRenderer(
   host: HTMLElement,
   body: PlayerSize,
   signal: AbortSignal,
-  diagnostics = false
+  {
+    diagnostics = false,
+    previewParallax = false,
+    characterPreview,
+  }: {
+    readonly diagnostics?: boolean
+    readonly previewParallax?: boolean
+    readonly characterPreview?: CharacterPreviewRef | undefined
+  } = {}
 ): Promise<WorldRenderer | undefined> {
   if (signal.aborted) return undefined
-  const app = new Application()
+  const app = new Application<WebGLRenderer>()
   let observer: ResizeObserver | undefined
   let disposed = false
   let releaseAssets: (() => void) | undefined
@@ -89,9 +115,32 @@ export async function createWorldRenderer(
       return undefined
     }
 
-    const terrain = new Container()
+    const geometry = new Container()
+    const actors = new Container()
+    const experiment = import.meta.env.DEV ? new URLSearchParams(host.ownerDocument.location.search).get('parallax') : null
+    const gameplayForestMode = experiment === '1' ? 'organic' : experiment === 'rectangular' ? 'rectangular' : 'graybox'
+    const parallax = (() => {
+      if (!import.meta.env.DEV || (!previewParallax && gameplayForestMode === 'graybox')) {
+        return undefined
+      }
+      const { gl } = app.renderer
+      const maxTextureSize: number = gl.getParameter(gl.MAX_TEXTURE_SIZE)
+      const supported = catalog.experimentalParallax?.filter(({ width, height }) => width <= maxTextureSize && height <= maxTextureSize)
+      return createParallaxRenderer(supported ?? [], import.meta.env.BASE_URL)
+    })()
     const entityAssets = createAtlasScope(sprites, import.meta.env.BASE_URL)
-    const player = createBeginnerView(body, entityAssets)
+    const characterAssets =
+      import.meta.env.DEV && characterPreview ? createAtlasScope(sprites, import.meta.env.BASE_URL, undefined, 'linear') : undefined
+    const idlePose = characterAssets ? sprites.get(visualIds.beginnerIdle)?.sprite.idlePose : undefined
+    const appearanceDiagnostics =
+      import.meta.env.DEV &&
+      characterPreview &&
+      new URLSearchParams(host.ownerDocument.location.search).get('appearanceDiagnostics') === '1'
+    const face = import.meta.env.DEV && characterAssets ? sprites.get(face01SpriteId)?.sprite.attachedFace : undefined
+    const faceLayers: PaperDollLayers | undefined = face
+      ? { face: { kind: 'attached', spriteId: face01SpriteId, attachment: 'face', originPx: face.originPx } }
+      : undefined
+    const player = createBeginnerView(body, entityAssets, characterAssets, idlePose, faceLayers)
     const peers = new Container()
     const peerViews = new Map<string, ReturnType<typeof createBeginnerView>>()
     const monsters = new Container()
@@ -101,6 +150,8 @@ export async function createWorldRenderer(
     const lootLayer = new Container()
     let visibleLoot: ReadonlyMap<string, GroundLootView> | undefined
     let mapSprites: ReturnType<typeof createMapSpriteView> | undefined
+    let mapTerrain: ReturnType<typeof createForestTerrainView> | undefined
+    let collisionOverlay: Graphics | undefined
     function clearRoomSprites() {
       for (const view of peerViews.values()) view.root.destroy({ children: true, context: true })
       for (const view of monsterViews.values()) view.root.destroy()
@@ -114,6 +165,13 @@ export async function createWorldRenderer(
     }
     releaseAssets = () => {
       mapSprites?.destroy()
+      mapTerrain?.destroy()
+      if (parallax) {
+        parallax.destroy()
+        delete host.dataset.parallaxLayers
+        delete host.dataset.parallaxTextures
+        delete host.dataset.terrainCells
+      }
       player.root.destroy({ children: true, context: true })
       clearRoomSprites()
       peers.destroy({ children: true, context: true })
@@ -126,10 +184,14 @@ export async function createWorldRenderer(
         delete host.dataset.combatDamageSprites
         delete host.dataset.combatDamageLabels
       }
+      characterAssets?.destroy()
+      if (import.meta.env.DEV) delete host.dataset.paperDollOrder
+      if (appearanceDiagnostics) delete host.dataset.appearance
       entityAssets.destroy()
     }
-    terrain.addChild(monsters, peers, player.root, lootLayer, damageLayer)
-    app.stage.addChild(terrain)
+    actors.addChild(monsters, peers, player.root, lootLayer, damageLayer)
+    if (parallax) app.stage.addChild(parallax.background, geometry, parallax.foreground, actors)
+    else app.stage.addChild(geometry, actors)
 
     app.canvas.setAttribute('role', 'img')
     app.canvas.setAttribute('aria-label', 'Beginner 平台場景')
@@ -142,24 +204,51 @@ export async function createWorldRenderer(
 
     let renderedSize: ViewportSize = initialSize
     let activeMap: NormalizedMap | undefined
+    let activeForestMode: ForestRenderMode = 'graybox'
     let mapGraphics: Graphics | undefined
+    let foregroundBands: ReturnType<typeof forestForegroundBands>
+    let hasParallaxBackdrop = false
+    let hasTerrainArt = false
     return {
       resetRoom: clearRoomSprites,
-      render(frame) {
+      parallaxStats: () => parallax?.stats(),
+      terrainStats: () => mapTerrain?.stats(),
+      render(frame, preview) {
         if (disposed || size.width < 1 || size.height < 1) return
+        const character = import.meta.env.DEV ? characterPreview?.current : undefined
+        const characterSpriteId = character && characterPreviewModes[character.mode].spriteId
+        if (characterSpriteId) characterAssets?.prepare(characterSpriteId)
+        if (character?.mode === 'animated-base-body' || character?.mode === 'paper-doll')
+          characterAssets?.prepare(visualIds.beginnerBaseBody)
+        if (import.meta.env.DEV && character?.mode === 'paper-doll') {
+          if (character.showDiagnosticLayers) characterAssets?.prepare(diagnosticSpriteId, true)
+          else if (character.showFace && faceLayers) characterAssets?.prepare(face01SpriteId, true)
+        }
         const { map } = frame
-        if (map !== activeMap) {
-          const graphics = drawTerrain(map)
-          mapGraphics?.destroy({ context: true })
+        const mapChanged = map !== activeMap
+        const forestMode = import.meta.env.DEV && map.id === 'm1' && parallax ? (preview?.mode ?? gameplayForestMode) : 'graybox'
+        const modeChanged = forestMode !== activeForestMode
+        if (mapChanged) {
           mapSprites?.destroy()
-          terrain.addChildAt(graphics, 0)
           mapSprites = undefined
+          collisionOverlay?.destroy({ context: true })
+          collisionOverlay = undefined
           if (!frame.peers) {
             mapSprites = createMapSpriteView(map, createAtlasScope(sprites, import.meta.env.BASE_URL), body, frame.guide?.npc)
-            terrain.addChildAt(mapSprites.root, 1)
+            actors.addChildAt(mapSprites.root, 0)
           }
-          mapGraphics = graphics
           activeMap = map
+        }
+        if (import.meta.env.DEV && (mapChanged || modeChanged)) {
+          mapTerrain?.destroy()
+          mapTerrain = undefined
+          activeForestMode = forestMode
+          foregroundBands = forestMode === 'rectangular' ? forestForegroundBands(map) : undefined
+          if (forestMode !== 'graybox') {
+            const assets = createAtlasScope(sprites, import.meta.env.BASE_URL, undefined, forestMode === 'organic' ? 'linear' : 'nearest')
+            mapTerrain = createForestTerrainView(map, assets, forestMode)
+            geometry.addChildAt(mapTerrain.root, 0)
+          }
         }
         const nextResolution = Math.min(window.devicePixelRatio, 2)
         if (size.width !== renderedSize.width || size.height !== renderedSize.height || nextResolution !== resolution) {
@@ -169,9 +258,50 @@ export async function createWorldRenderer(
         }
 
         const target = { x: frame.position.x + body.width / 2, y: frame.position.y + body.height / 2 }
-        const camera = followCamera(target, map.bounds, size)
-        terrain.scale.set(camera.scale)
-        terrain.position.set(-camera.origin.x * camera.scale, -camera.origin.y * camera.scale)
+        const camera =
+          preview && parallax
+            ? { origin: preview.origin, scale: viewportScale(size) * preview.zoom }
+            : followCamera(target, map.bounds, size)
+        let backdrop = false
+        const terrainArt = mapTerrain?.prepare() === true
+        if (mapTerrain) mapTerrain.root.visible = terrainArt
+        if (parallax) {
+          const layers =
+            forestMode === 'graybox'
+              ? undefined
+              : (preview?.layers ?? (forestMode === 'organic' ? organicForestParallax : experimentalMapParallax.get(map.id)))
+          parallax.setLayers(layers, foregroundBands)
+          backdrop = parallax.render(map.bounds, camera, size)
+          if (!preview) {
+            const { displayObjects, loaded } = parallax.stats()
+            if (host.dataset.parallaxLayers !== String(displayObjects)) host.dataset.parallaxLayers = String(displayObjects)
+            if (host.dataset.parallaxTextures !== String(loaded)) host.dataset.parallaxTextures = String(loaded)
+            const terrainCells = String(mapTerrain?.stats().cells ?? 0)
+            if (host.dataset.terrainCells !== terrainCells) host.dataset.terrainCells = terrainCells
+          }
+        }
+        if (mapChanged || modeChanged || backdrop !== hasParallaxBackdrop || terrainArt !== hasTerrainArt) {
+          hasParallaxBackdrop = backdrop
+          hasTerrainArt = terrainArt
+          mapGraphics?.destroy({ context: true })
+          mapGraphics = drawTerrain(map, {
+            showBackdrop: !backdrop,
+            showGraybox: !terrainArt,
+            showBoundary: forestMode !== 'organic' || !terrainArt,
+          })
+          geometry.addChildAt(mapGraphics, 0)
+        }
+        if (parallax && preview?.showCollision && !collisionOverlay) {
+          collisionOverlay = drawCollisionOverlay(map)
+          geometry.addChild(collisionOverlay)
+        }
+        if (collisionOverlay) collisionOverlay.visible = preview?.showCollision === true
+        const sceneX = -camera.origin.x * camera.scale
+        const sceneY = -camera.origin.y * camera.scale
+        geometry.scale.set(camera.scale)
+        geometry.position.set(sceneX, sceneY)
+        actors.scale.set(camera.scale)
+        actors.position.set(sceneX, sceneY)
         mapSprites?.draw(frame.visualTick)
         if (visibleLoot !== frame.groundLoot) {
           visibleLoot = frame.groundLoot
@@ -248,17 +378,33 @@ export async function createWorldRenderer(
         for (const [id, peer] of frame.peers ?? []) {
           let view = peerViews.get(id)
           if (!view) {
-            view = createBeginnerView(body, entityAssets)
+            view = createBeginnerView(body, entityAssets, characterAssets, idlePose, faceLayers)
             peerViews.set(id, view)
             peers.addChild(view.root)
           }
-          view.draw(peer)
+          view.draw(peer, character)
         }
         if (diagnostics && frame.peers) {
           const spriteCount = String(peerViews.size)
           if (host.dataset.peerSprites !== spriteCount) host.dataset.peerSprites = spriteCount
         }
-        player.draw(frame)
+        player.draw(frame, character, character && character.facing !== 'gameplay' ? character.facing : frame.facing)
+        if (appearanceDiagnostics) {
+          const sample = JSON.stringify({
+            mode: character?.mode,
+            faceTextureAvailable: Boolean(characterAssets?.textureAt(face01SpriteId, 'idle', 0)),
+            local: player.appearance,
+            remote: [...peerViews.values()].map((view) => view.appearance),
+          })
+          if (host.dataset.appearance !== sample) host.dataset.appearance = sample
+        }
+        if (import.meta.env.DEV && characterPreview) {
+          const order = character?.mode === 'paper-doll' && character.showLayerOrder ? player.layerOrder : undefined
+          if (order !== host.dataset.paperDollOrder) {
+            if (order === undefined) delete host.dataset.paperDollOrder
+            else host.dataset.paperDollOrder = order
+          }
+        }
         app.render()
       },
     }

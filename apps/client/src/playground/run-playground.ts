@@ -2,6 +2,7 @@ import { initialPhysicsBalance, type GuideDefinition } from '@viesma/game-data'
 import { findOverlappingPortal, type GuideInteraction } from '@viesma/simulation'
 import { attachBrowserInput } from '../input/browser-input'
 import type { AuxiliaryAction } from '../input/input-state'
+import type { CharacterPreviewRef } from '../rendering/character-preview'
 import type { PlayerPresentation } from '../rendering/player-view'
 import { createWorldRenderer } from '../rendering/world-renderer'
 import { createPlayground, mapNames, type DebugDamage } from './scene'
@@ -24,12 +25,14 @@ export async function runPlayground(
   publishActions: (actions: readonly AuxiliaryAction[]) => void,
   signal: AbortSignal,
   takeGuideClose: () => GuideInteraction | undefined,
-  takeDebugDamage?: () => DebugDamage | undefined
+  takeDebugDamage?: () => DebugDamage | undefined,
+  characterPreview?: CharacterPreviewRef
 ) {
   const renderer = await createWorldRenderer(
     host,
     { width: initialPhysicsBalance.bodyWidthWorldUnits, height: initialPhysicsBalance.bodyHeightWorldUnits },
-    signal
+    signal,
+    { characterPreview }
   )
   if (!renderer || signal.aborted) return
 

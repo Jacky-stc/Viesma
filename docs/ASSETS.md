@@ -37,3 +37,19 @@ Vite 產生用於 lazy loading 的 client manifest。Beginner 在場景期間共
 開發時可省略標了 `optionalInDevelopment` 的 PNG。缺圖、下載失敗或解碼錯誤時，Beginner 沿用原有幾何圖示，缺少的裝飾和 NPC sprite 略過，同一圖集於該場景只嘗試一次。Guide 距離判定、提示和對話仍由遊戲資料提供。修改 manifest、來源或登錄狀態後重新啟動 dev server。正式建置要求所有已登錄檔案都存在。
 
 目前使用固定圖框，支援循環和停在末幀。完整 Tiled tile layer 繪製、量產美術、自動打包、音訊與實機效能測試留待對應任務。七張現行地圖尚未引用外部 atlas tileset。資產圖片位元組及 sprite clip 留在 client manifest。Tiled 路徑及格線等既有正規化欄位仍依契約納入地圖 hash。
+
+## VF.1 開發用視差素材
+
+五張 Forest Entrance 全圖 PNG 由獨立的 [實驗登錄](../content/assets/experimental-parallax.json) 引用 `art/source/environments/forest-entrance/` 的原始檔。開發登錄允許最大 4096 × 4096 的全圖 PNG 並沿用 M2.4 的 PNG、SHA-256、授權、雜湊 URL 及署名驗證。一般圖集維持 2048 × 2048 的上限。`pnpm run validate:assets` 檢查兩份登錄，Vite 正式建置只發行一般圖集。開發伺服器可略過缺失的實驗 PNG，遊戲回退至可用圖層或灰盒。 [來源](../content/assets/provenance/forest-entrance.md) · [稽核](evidence/VF1.md)
+
+VF.2 的 108 × 108 地形圖集屬開發登錄，沿用 M2.4 的圖框、署名和 SHA-256 驗證。圖框為 32 × 32 像素，周圍各 2 px 以邊緣像素外擴。`pnpm run validate:assets` 也檢查此登錄。以 Python 3.12／Pillow 10.3.0 執行 `python content/assets/slice-forest-terrain.py` 可重建圖集、tileset 檔及接觸表。產出後以 `pnpm exec prettier --write content/assets/experimental-terrain.json` 格式化圖集登錄。 [圖集登錄](../content/assets/experimental-terrain.json) · [切片清單](../content/assets/forest-terrain-slices.json)
+
+VF.2.1b 以同一管線登錄九個可獨立取樣的非方形圖框。執行 `python content/assets/slice-forest-organic-terrain.py` 重建衍生 atlas 與其登錄。生成器先核對四張來源的 SHA-256，輸出後由 `pnpm run validate:assets` 驗證 atlas 的尺寸與摘要。 [圖集登錄](../content/assets/experimental-organic-terrain.json) · [切片清單](../apps/client/src/rendering/forest-organic-terrain-slices.json)
+
+## VF.3 開發用角色素材
+
+`python content/assets/derive-beginner-character.py` 從 `character-master.png` 與 `base-body/base-body-idle.png` 生成兩張高 256 px 的單格圖集及共同登錄。生成器先核對 Base Body 原圖 SHA-256，再印出兩張原圖的摘要、可見輪廓及腳底錨點。預設錨點取可見輪廓最低 3% 區段的水平中點。`--foot-x` 可微調 Character Master 的原圖 X 座標。以 `pnpm run validate:assets` 驗證衍生圖與署名。更新 Base Body 原圖時，先重做像素與朝向稽核，再登錄新的摘要。
+
+開發伺服器會於角色登錄更新後重新載入資產。開發遊戲使用 `?character=1`，按選取的模式載入對應的雜湊 URL。兩個靜態圖集各有一個 `idle` 圖框，所有角色狀態共用該圖框，實際 world width 由圖框比例決定。換圖時同步核對各模式的 `sourceFacing`。使用相同畫布的本機與遠端角色共用已載入的紋理。 [原圖來源](../content/assets/provenance/beginner-character.md) · [開發登錄](../content/assets/experimental-character.json) · [預覽設定](../apps/client/src/rendering/character-preview.ts)
+
+同一指令也從已驗收的靜態 Base Body 生成 Animated Base Body。加上 `--evidence-dir docs/evidence/vf3/idle-derived` 可一併重建同尺度對照、頭部疊圖、腿部差異與掛載點標示。1536 × 384 PNG 由四格 384 × 384 組成，atlas 取樣框每側向內 8 px，metadata 用 (8, 8) offset 還原同一腳底基準。實際逐格 metadata 在開發登錄中的 `beginner-base-body-idle` sprite 下的 `idlePose`。正式建置沿用既有資產登錄。 [衍生驗證](evidence/VF3.md#vf33a-deterministic-idle-recovery) · [runtime PNG](../content/assets/images/beginner-base-body-idle.png)

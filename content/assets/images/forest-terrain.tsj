@@ -1,0 +1,15 @@
+{
+  "type": "tileset",
+  "version": "1.10",
+  "tiledversion": "1.10.2",
+  "name": "forest-terrain",
+  "image": "forest-terrain-atlas.png",
+  "imagewidth": 108,
+  "imageheight": 108,
+  "tilewidth": 32,
+  "tileheight": 32,
+  "columns": 3,
+  "tilecount": 9,
+  "margin": 2,
+  "spacing": 4
+}

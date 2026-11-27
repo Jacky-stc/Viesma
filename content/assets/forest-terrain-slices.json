@@ -1,0 +1,26 @@
+{
+  "source": "art/source/environments/forest-entrance/forest-terrain.png",
+  "sourceSha256": "d8f651b534da1e0f9a86a967019d49ce992ab6a78b1ae9effc003b81213af248",
+  "tilePixels": 32,
+  "tileWorldUnits": 32,
+  "columns": 3,
+  "extrusion": 2,
+  "tiles": [
+    { "id": "forest-ground-left", "crop": [48, 65, 136, 153] },
+    { "id": "forest-ground-middle", "crop": [145, 55, 241, 151] },
+    { "id": "forest-ground-right", "crop": [669, 63, 761, 155] },
+    { "id": "forest-platform-left", "crop": [826, 52, 918, 144] },
+    { "id": "forest-platform-middle", "crop": [983, 48, 1079, 144] },
+    { "id": "forest-platform-right", "crop": [1148, 50, 1239, 141] },
+    { "id": "forest-soil", "crop": [146, 171, 242, 267] },
+    { "id": "forest-bottom-left", "crop": [41, 277, 133, 369] },
+    { "id": "forest-bottom-right", "crop": [556, 277, 638, 359] }
+  ],
+  "auditOnly": [
+    { "id": "inner-corner", "crop": [43, 169, 137, 263] },
+    { "id": "vine", "crop": [23, 700, 134, 846] },
+    { "id": "rocks", "crop": [522, 701, 756, 831] },
+    { "id": "mushrooms", "crop": [761, 734, 872, 810] },
+    { "id": "shrub", "crop": [1062, 704, 1276, 813] }
+  ]
+}

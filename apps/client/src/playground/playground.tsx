@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from 'react'
 import { touchControls } from '../input/browser-input'
 import type { AuxiliaryAction } from '../input/input-state'
 import type { MultiplayerPresentation } from '../multiplayer/run-multiplayer'
+import { defaultCharacterPreview, type CharacterPreviewOptions } from '../rendering/character-preview'
 import { ApPanel } from './ap-panel'
+import { CharacterPreviewControls } from './character-preview-controls'
 import { InventoryPanel } from './inventory-panel'
 import { runPlayground, type PlaygroundMode, type PlaygroundPresentation } from './run-playground'
 import type { DebugDamage } from './scene'
@@ -66,6 +68,8 @@ export function Playground() {
   const startup = useRef(Promise.resolve())
   const pendingDebugDamage = useRef<DebugDamage>(undefined)
   const pendingGuideClose = useRef<GuideInteraction>(undefined)
+  const characterPreview = useRef<CharacterPreviewOptions>(defaultCharacterPreview)
+  const [showCharacterPreview] = useState(() => import.meta.env.DEV && new URLSearchParams(window.location.search).get('character') === '1')
   const [active, setActive] = useState(true)
   const [mode, setMode] = useState<Mode>('interactive')
   const [presentation, setPresentation] = useState<PlaygroundPresentation>()
@@ -87,6 +91,7 @@ export function Playground() {
     if (!active || !host || !surface) return
 
     const controller = new AbortController()
+    const preview = showCharacterPreview ? characterPreview : undefined
     const failedStartup = () => {
       if (!controller.signal.aborted) {
         controller.abort()
@@ -119,14 +124,15 @@ export function Playground() {
             failedStartup,
             toggleApPanel,
             toggleInventory,
-            controller.signal
+            controller.signal,
+            preview
           )
         }
-        return runPlayground(host, surface, mode, setPresentation, setActions, controller.signal, takeGuideClose, takeDebugDamage)
+        return runPlayground(host, surface, mode, setPresentation, setActions, controller.signal, takeGuideClose, takeDebugDamage, preview)
       })
       .catch(failedStartup)
     return () => controller.abort()
-  }, [active, mode])
+  }, [active, mode, showCharacterPreview])
 
   useEffect(() => {
     const panel = inventoryRef.current
@@ -224,6 +230,13 @@ export function Playground() {
           ref={hostRef}
           onPointerDown={controlsReady ? () => surfaceRef.current?.focus({ preventScroll: true }) : undefined}
         />
+        {import.meta.env.DEV && showCharacterPreview && (
+          <CharacterPreviewControls
+            onChange={(options) => {
+              characterPreview.current = options
+            }}
+          />
+        )}
         {guide && guideInteraction && (
           <section
             className="playground-guide"

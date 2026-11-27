@@ -20,8 +20,12 @@ test('Village lazily loads its atlases within the cold-load budget and publishes
   await session.send('Network.enable')
   await session.send('Network.setCacheDisabled', { cacheDisabled: true })
   await installAtlasAudit(page)
-  await page.goto('/')
+  await page.goto('/?parallax=1&character=1')
   await expect(page.getByLabel('目前地圖')).toHaveText('Village')
+  await expect(page.getByText('角色預覽', { exact: true })).toHaveCount(0)
+  expect(
+    [...responses.keys()].some((url) => /\/beginner-(?:static|base-body(?:-idle)?|paper-doll-diagnostics|face-01)-atlas\./.test(url))
+  ).toBe(false)
   const firstScene = ['beginner', 'village']
   await expect.poll(() => readAtlasAudit(page)).toEqual({ bitmaps: firstScene, textures: firstScene })
   expect(
@@ -54,6 +58,10 @@ test('Village lazily loads its atlases within the cold-load budget and publishes
   const credits = await page.request.get(href)
   expect(credits.ok()).toBe(true)
   expect(await credits.text()).toContain('village-guide')
+  const attribution = await credits.text()
+  expect(attribution).not.toContain('beginner-base-body-idle')
+  expect(attribution).not.toContain('beginner-paper-doll-diagnostics')
+  expect(attribution).not.toContain('beginner-face-01')
   expect(errors).toEqual([])
 })
 

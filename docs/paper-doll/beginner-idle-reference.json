@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "poseSetId": "beginner-idle-reference",
+  "poseVersion": 1,
+  "sourceFacing": "left",
+  "originalSizePx": { "width": 384, "height": 384 },
+  "pivotPx": { "x": 192, "y": 320 },
+  "worldUnitsPerPixel": 0.3125,
+  "clips": {
+    "idle": {
+      "loop": false,
+      "frames": [
+        {
+          "index": 0,
+          "durationTicks": 1,
+          "attachments": {
+            "head": { "x": 196.2, "y": 126.78, "rotationDeg": 0 },
+            "face": { "x": 151.99, "y": 157.29, "rotationDeg": 0 },
+            "torso": { "x": 190.89, "y": 233.78, "rotationDeg": 0 },
+            "mainHand": { "x": 226.71, "y": 257.22, "rotationDeg": 61 },
+            "offHand": { "x": 159.5, "y": 257.22, "rotationDeg": 129 },
+            "foot": { "x": 192, "y": 320, "rotationDeg": 0 },
+            "nearSole": { "x": 213.44, "y": 320, "rotationDeg": 0 },
+            "farSole": { "x": 168.79, "y": 320, "rotationDeg": 0 }
+          },
+          "drawOrder": ["baseBody"],
+          "layers": {
+            "baseBody": {
+              "atlasId": "beginner-base-body-atlas",
+              "rectPx": { "x": 0, "y": 0, "width": 180, "height": 256 },
+              "offsetPx": { "x": 102, "y": 64 }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

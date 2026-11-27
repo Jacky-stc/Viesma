@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer'
-import type { Plugin } from 'vite'
-import { loadProjectAssets } from './asset-project.ts'
+import { normalizePath, type Plugin } from 'vite'
+import { characterManifestPath, loadProjectAssets } from './asset-project.ts'
 
 const virtualId = 'virtual:viesma-assets'
 const resolvedId = '\0' + virtualId
@@ -28,6 +28,11 @@ export function viesmaAssets(): Plugin {
       if (id === resolvedId) return `export default ${JSON.stringify(assets.catalog)}`
     },
     configureServer(server) {
+      const characterManifest = normalizePath(characterManifestPath)
+      server.watcher.add(characterManifestPath)
+      server.watcher.on('change', (file) => {
+        if (normalizePath(file) === characterManifest) void server.restart()
+      })
       server.middlewares.use((request, response, next) => {
         const path = request.url?.split('?')[0]?.slice(server.config.base.length)
         if (!request.url?.startsWith(server.config.base) || !path?.startsWith('game-assets/')) return next()

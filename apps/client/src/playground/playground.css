@@ -103,6 +103,79 @@ body {
   display: block;
 }
 
+.playground-canvas[data-paper-doll-order]::after {
+  position: absolute;
+  inset: 0.5rem auto auto 0.5rem;
+  max-width: 70%;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  color: #ffe070;
+  background: #192432;
+  content: attr(data-paper-doll-order);
+  font:
+    0.75rem ui-monospace,
+    monospace;
+  pointer-events: none;
+}
+
+.character-preview {
+  position: absolute;
+  inset: 0.5rem 0.5rem auto auto;
+  z-index: 1;
+  max-height: calc(100% - 1rem);
+  overflow: auto;
+  border: 0.0625rem solid #527889;
+  border-radius: 0.375rem;
+  background: #1a3141;
+  font-size: 0.875rem;
+}
+
+.character-preview summary {
+  box-sizing: border-box;
+  min-height: 2.75rem;
+  padding: 0.6875rem;
+  cursor: pointer;
+}
+
+.character-preview-options {
+  display: grid;
+  gap: 0.375rem;
+  padding: 0 0.6875rem 0.6875rem;
+}
+
+.character-preview-options label {
+  display: flex;
+  min-height: 1.625rem;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.character-preview-options .face-calibration summary {
+  min-height: 0;
+  padding: 0.375rem 0;
+}
+
+.face-calibration fieldset {
+  margin: 0;
+  padding: 0.375rem;
+  border: 0.0625rem solid #527889;
+  border-radius: 0.25rem;
+}
+
+.face-calibration input[type='range'] {
+  width: 5rem;
+}
+
+.face-calibration output {
+  font-variant-numeric: tabular-nums;
+}
+
+.face-calibration-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
 .playground-status {
   position: relative;
   margin: 1rem;

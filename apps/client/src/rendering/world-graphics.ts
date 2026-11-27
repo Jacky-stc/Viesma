@@ -15,25 +15,27 @@ export const worldColors = {
   portal: 0xffcc89,
 }
 
-export function drawTerrain(world: NormalizedMap): Graphics {
+export function drawTerrain(world: NormalizedMap, { showBackdrop = true, showGraybox = true, showBoundary = true } = {}): Graphics {
   const { origin, width, height } = world.bounds
   const { x, y } = origin
-  const terrain = new Graphics().rect(x, y, width, height).fill(worldColors.sky)
-
-  const gridStep = world.tileSizeWorldUnits * 2
-  for (let gridX = x + gridStep; gridX < x + width; gridX += gridStep) {
-    terrain
-      .moveTo(gridX, y)
-      .lineTo(gridX, y + height)
-      .stroke({ color: worldColors.grid, width: 1 })
+  const terrain = new Graphics()
+  if (showBackdrop) {
+    terrain.rect(x, y, width, height).fill(worldColors.sky)
+    const gridStep = world.tileSizeWorldUnits * 2
+    for (let gridX = x + gridStep; gridX < x + width; gridX += gridStep) {
+      terrain
+        .moveTo(gridX, y)
+        .lineTo(gridX, y + height)
+        .stroke({ color: worldColors.grid, width: 1 })
+    }
+    for (let gridY = y + gridStep; gridY < y + height; gridY += gridStep) {
+      terrain
+        .moveTo(x, gridY)
+        .lineTo(x + width, gridY)
+        .stroke({ color: worldColors.grid, width: 1 })
+    }
   }
-  for (let gridY = y + gridStep; gridY < y + height; gridY += gridStep) {
-    terrain
-      .moveTo(x, gridY)
-      .lineTo(x + width, gridY)
-      .stroke({ color: worldColors.grid, width: 1 })
-  }
-  for (const { kind, bounds } of world.colliders) {
+  for (const { kind, bounds } of showGraybox ? world.colliders : []) {
     const { x, y } = bounds.origin
     const fill = kind === 'oneWay' ? worldColors.oneWay : worldColors.solid
     const edge = kind === 'oneWay' ? worldColors.oneWayEdge : worldColors.solidEdge
@@ -53,7 +55,18 @@ export function drawTerrain(world: NormalizedMap): Graphics {
       .stroke({ color: worldColors.portal, width: 2 })
   }
 
-  return terrain.rect(x + 1, y + 1, width - 2, height - 2).stroke({ color: worldColors.boundary, width: 2 })
+  if (showBoundary) terrain.rect(x + 1, y + 1, width - 2, height - 2).stroke({ color: worldColors.boundary, width: 2 })
+  return terrain
+}
+
+export function drawCollisionOverlay(world: NormalizedMap) {
+  const graphics = new Graphics()
+  for (const { kind, bounds } of world.colliders) {
+    const { x, y } = bounds.origin
+    const color = kind === 'oneWay' ? worldColors.oneWayEdge : worldColors.solidEdge
+    graphics.rect(x, y, bounds.width, bounds.height).fill({ color, alpha: 0.12 }).stroke({ color, width: 1.5 })
+  }
+  return graphics
 }
 
 const torsoColors = {

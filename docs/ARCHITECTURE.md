@@ -93,6 +93,16 @@ docs/
 
 M2.4 的 [視覺資產管線](ASSETS.md) 在 Vite 建置端驗證本機圖集、引用及授權紀錄，瀏覽器取得只含渲染所需資料的 manifest。Pixi 依穩定 ID 延遲載入圖集，地圖切換時釋放前一張圖的資源。Sprite 尺寸與動畫只屬於 client presentation。
 
+VF.1 的視差設定由 client 的 map ID 選取。預覽和遊戲共用 Pixi Application、相機比例、ResizeObserver、DPR 與 PNG 解碼器。背景和前景容器以 CSS 視窗像素定位，地形及角色以相同世界相機渲染。水平重複使用單一圖像高度的 `TilingSprite`。切圖先銷毀過時的 display object，再取消或釋放目的圖不需的 ImageBitmap、Texture 和 GPU source。相鄰地圖若引用相同 asset ID，已載入或進行中的請求仍可使用。 [Visual Foundation](VISUAL_FOUNDATION.md) · [PixiJS TilingSprite](https://pixijs.com/8.x/guides/components/scene-objects/tiling-sprite)
+
+VF.2 的開發地形圖集由 map-scoped atlas scope 持有。Forest Entrance 的顯示矩形取自現有 Tiled 正規化碰撞，按 32 world units 拼接來源圖塊並裁切餘寬與餘高。前景的水平紋理相位共用原相機，繪製 quad 限於兩段主地板的內部，略過裂隙及所有薄平台。預覽與實驗遊戲走同一條 Pixi render 和 fallback 路徑。 [VF.2 驗證](evidence/VF2.md)
+
+VF.2.1b 自然地形以三組完整端蓋和可循環的中段取代 VF.2 的矩形圖塊。像素錨點對齊相同的正規化碰撞上緣，物件以世界座標繪製在角色、怪物、掉落和戰鬥回饋後方。切換模式或地圖時沿用 atlas scope 釋放資源。實驗模式共用 L0–L3，VF.2 比較模式才建立獨立 L5 與區帶。 [VF.2.1b 驗證](evidence/VF2.1.md)
+
+VF.3.1 將單格開發 atlas 加到既有 Beginner view。畫布生命週期內，本機與遠端 sprite 共用一個線性取樣的 atlas scope，換房時釋放遠端 view，卸載時銷毀共用 frame texture、GPU source 與 ImageBitmap，並取消未完成的請求。繪製以原本的本機預測／校正或遠端插值產生 position 和 facing，鞋底以 body 底邊中點為準。預覽高度、朝向覆寫與疊圖只由 renderer 讀取。既有動畫圖集與向量圖示提供逐級回退。 [VF.3.1 驗證](evidence/VF3.md)
+
+VF.3.2a 將 Base Body 加入同一個 Beginner view 與 atlas scope。每個開發模式在選用時載入對應圖集，後續切圖和切回模式可重用。實驗圖框以自身的來源朝向與角色朝向決定鏡射，所有模式沿用同一個世界腳點。 [VF.3.2a 驗證](evidence/VF3.md#vf32a-base-body-integration)
+
 Repository ports 在 domain 的 application boundary 定義，例如 `CharacterRepository`、`RewardRepository`、`InventoryRepository`、`SessionRepository`；memory／PG adapter 共用契約。Domain reward intent 不使用 Colyseus Schema。初期不額外建立通用 event bus、CQRS framework、service container 或 ECS；使用明確函式、entity maps 與小型 services。
 
 M0.2 建立 `domain`、`physics`、`simulation`、`protocol` 與 `network-colyseus` 的 workspace 公開入口。Domain 提供 plain models 和 repository ports，physics 提供世界座標與 AABB 契約，protocol 提供 `InputFrame` 與公開 room header 的 wire DTO，network adapter 將 map instance 與 tick 投影為 room header。M0.4 建立 [game-data 的 schema、fixture 與載入契約](GAME_DATA.md)。Colyseus Schema 與 room 接線由 M3.1 建立，repository 實作按 M5–M7 的任務交付。

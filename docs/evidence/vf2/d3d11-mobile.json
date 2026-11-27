@@ -1,0 +1,10 @@
+{
+  "browser": "159.0.8154.6",
+  "samples": 300,
+  "seconds": 5.000100000000001,
+  "fps": 59.998800023999515,
+  "frameP50Ms": 16.699999999999818,
+  "frameP95Ms": 17,
+  "dpr": 2,
+  "renderer": "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics (0x0000A7A1) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+}

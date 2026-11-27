@@ -1,0 +1,11 @@
+{
+  "mode": "rectangular",
+  "browser": "159.0.8154.6",
+  "samples": 301,
+  "seconds": 5.016799999999999,
+  "fps": 59.998405357997136,
+  "frameP50Ms": 16.69999999999891,
+  "frameP95Ms": 16.899999999999636,
+  "dpr": 2,
+  "renderer": "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics (0x0000A7A1) Direct3D11 vs_5_0 ps_5_0, D3D11)"
+}

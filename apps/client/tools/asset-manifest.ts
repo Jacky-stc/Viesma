@@ -4,11 +4,19 @@ import { dirname, resolve } from 'node:path'
 import { crc32, inflateSync } from 'node:zlib'
 import {
   beginnerStates,
+  face01SpriteId,
+  idleAttachmentIds,
+  paperDollSlots,
   visualIds,
   type AssetAtlas,
   type AssetCatalog,
   type AtlasFrame,
+  type AttachedFaceAsset,
+  type BeginnerIdlePose,
+  type IdleAttachment,
   type SpriteAsset,
+  type SpriteClip,
+  type TextureImageAsset,
 } from '../src/rendering/assets/catalog.ts'
 
 export const attributionPath = 'game-assets/attribution.txt'
@@ -202,7 +210,157 @@ function readFrame(input: unknown, path: string, width: number, height: number):
   }
 }
 
-function readSprite(input: unknown, path: string, width: number, height: number): SpriteAsset {
+function readIdlePose(input: unknown, path: string, clip: SpriteClip | undefined, atlasId: string): BeginnerIdlePose {
+  const data = record(input, path)
+  const { width, height } = record(data.originalSizePx, path)
+  const pivot = record(data.pivotPx, path)
+  if (
+    data.schemaVersion !== 1 ||
+    data.poseSetId !== 'beginner' ||
+    data.poseVersion !== 1 ||
+    data.sourceFacing !== 'left' ||
+    width !== 384 ||
+    height !== 384 ||
+    pivot.x !== 192 ||
+    pivot.y !== 320 ||
+    data.worldUnitsPerPixel !== 0.3125
+  )
+    fail('INVALID_MANIFEST', path, 'Expected the Beginner v1 canvas, scale, facing and pivot')
+  const idle = record(record(data.clips, path).idle, path)
+  const frames = list(idle.frames, path)
+  if (idle.loop !== true || !clip?.loop || clip.ticksPerFrame !== 6 || frames.length !== 4 || clip.frames.length !== frames.length) {
+    fail('INVALID_MANIFEST', path, 'Expected four looping Idle frames at six ticks each')
+  }
+  return {
+    pivotPx: { x: pivot.x, y: pivot.y },
+    worldUnitsPerPixel: data.worldUnitsPerPixel,
+    ticksPerFrame: clip.ticksPerFrame,
+    frames: frames.map((input, index) => {
+      const framePath = `${path}.clips.idle.frames[${index}]`
+      const frame = record(input, framePath)
+      const order = list(frame.drawOrder, framePath)
+      const drawOrder = order.map((slot) => {
+        const known = paperDollSlots.find((id) => id === slot)
+        if (known === undefined) fail('INVALID_MANIFEST', framePath, 'Unknown Paper Doll slot')
+        return known
+      })
+      if (
+        frame.index !== index ||
+        frame.durationTicks !== clip.ticksPerFrame ||
+        !drawOrder.includes('baseBody') ||
+        new Set(drawOrder).size !== drawOrder.length
+      ) {
+        fail('INVALID_MANIFEST', framePath, 'Invalid Idle index, duration or draw order')
+      }
+      const layer = record(record(frame.layers, framePath).baseBody, framePath)
+      const rect = record(layer.rectPx, framePath)
+      const offset = record(layer.offsetPx, framePath)
+      const expected = clip.frames[index]
+      if (
+        layer.atlasId !== atlasId ||
+        offset.x !== 8 ||
+        offset.y !== 8 ||
+        rect.x !== index * 384 + offset.x ||
+        rect.y !== offset.y ||
+        rect.width !== width - 2 * offset.x ||
+        rect.height !== height - 2 * offset.y ||
+        !expected ||
+        expected.x !== rect.x ||
+        expected.y !== rect.y ||
+        expected.width !== rect.width ||
+        expected.height !== rect.height
+      ) {
+        fail('INVALID_REFERENCE', framePath, 'Idle pose rect must match its inset atlas frame')
+      }
+      const points = record(frame.attachments, framePath)
+      function point(id: (typeof idleAttachmentIds)[number]): IdleAttachment {
+        const { x, y, rotationDeg } = record(points[id], `${framePath}.attachments.${id}`)
+        if (
+          typeof x !== 'number' ||
+          !Number.isFinite(x) ||
+          x < 0 ||
+          x > 384 ||
+          typeof y !== 'number' ||
+          !Number.isFinite(y) ||
+          y < 0 ||
+          y > 384 ||
+          typeof rotationDeg !== 'number' ||
+          !Number.isFinite(rotationDeg) ||
+          rotationDeg < 0 ||
+          rotationDeg >= 360
+        ) {
+          fail('INVALID_MANIFEST', framePath, `Invalid attachment ${id}`)
+        }
+        return { x, y, rotationDeg }
+      }
+      const foot = point('foot')
+      const nearSole = point('nearSole')
+      const farSole = point('farSole')
+      if (foot.x !== pivot.x || [foot, nearSole, farSole].some(({ y }) => y !== pivot.y)) {
+        fail('INVALID_MANIFEST', framePath, 'Invalid foot attachments')
+      }
+      return {
+        offsetPx: { x: offset.x, y: offset.y },
+        drawOrder,
+        attachments: {
+          head: point('head'),
+          face: point('face'),
+          torso: point('torso'),
+          mainHand: point('mainHand'),
+          offHand: point('offHand'),
+          foot,
+          nearSole,
+          farSole,
+        },
+      }
+    }),
+  }
+}
+
+function readAttachedFace(input: unknown, path: string, clips: Readonly<Record<string, SpriteClip>>): AttachedFaceAsset {
+  const fields = record(input, path)
+  const clip = clips.idle
+  const frame = clip?.frames[0]
+  if (
+    fields.poseSetId !== 'beginner' ||
+    fields.poseVersion !== 1 ||
+    !frame ||
+    clip.frames.length !== 1 ||
+    clip.loop ||
+    clip.ticksPerFrame !== 1 ||
+    Object.keys(clips).length !== 1
+  ) {
+    fail('INVALID_MANIFEST', path, 'Expected one static frame compatible with the Beginner v1 pose')
+  }
+  const offset = record(fields.offsetPx, path)
+  const origin = record(fields.originPx, path)
+  const offsetPx = {
+    x: integer(offset.x, path, 8, 384 - 8 - frame.width),
+    y: integer(offset.y, path, 8, 384 - 8 - frame.height),
+  }
+  if (typeof origin.x !== 'number' || !Number.isFinite(origin.x) || typeof origin.y !== 'number' || !Number.isFinite(origin.y)) {
+    fail('INVALID_MANIFEST', path, 'Expected a finite origin in trimmed sprite pixels')
+  }
+  const calibrationPath = `${path}.defaultCalibration`
+  const { xPx, yPx, scale } = record(fields.defaultCalibration, calibrationPath)
+  if (
+    typeof xPx !== 'number' ||
+    Math.abs(xPx) > 32 ||
+    !Number.isInteger(xPx * 2) ||
+    typeof yPx !== 'number' ||
+    Math.abs(yPx) > 32 ||
+    !Number.isInteger(yPx * 2) ||
+    typeof scale !== 'number' ||
+    !Number.isFinite(scale) ||
+    scale < 0.5 ||
+    scale > 1.5
+  ) {
+    fail('INVALID_MANIFEST', calibrationPath, 'Expected offsets in half logical pixels and a supported uniform scale')
+  }
+  return { offsetPx, originPx: { x: origin.x, y: origin.y }, defaultCalibration: { xPx, yPx, scale } }
+}
+
+function readSprite(input: unknown, path: string, width: number, height: number, atlasId: string): SpriteAsset {
   const fields = record(input, path)
   const id = assetId(fields.id, `${path}.id`)
   const type = fields.type
@@ -223,12 +381,16 @@ function readSprite(input: unknown, path: string, width: number, height: number)
       })
   )
   if (Object.keys(clips).length === 0) fail('INVALID_MANIFEST', path, 'Expected at least one clip')
+  const idlePose = id === visualIds.beginnerIdle ? readIdlePose(fields.idlePose, `${path}.idlePose`, clips.idle, atlasId) : undefined
+  const attachedFace = id === face01SpriteId ? readAttachedFace(fields.attachedFace, `${path}.attachedFace`, clips) : undefined
   return {
     id,
     type,
     renderWidth: integer(fields.renderWidth, `${path}.renderWidth`, 1, maxDimension),
     renderHeight: integer(fields.renderHeight, `${path}.renderHeight`, 1, maxDimension),
     clips,
+    ...(idlePose && { idlePose }),
+    ...(attachedFace && { attachedFace }),
   }
 }
 
@@ -243,6 +405,19 @@ function unique(keys: Set<string>, value: string, path: string) {
 
 function validateCoverage(atlases: readonly AssetAtlas[]) {
   const sprites = new Map(atlases.flatMap(({ sprites }) => sprites.map((sprite) => [sprite.id, sprite] as const)))
+  const face = sprites.get(face01SpriteId)?.attachedFace
+  if (face) {
+    const pose = sprites.get(visualIds.beginnerIdle)?.idlePose
+    const anchor = pose?.frames[0]?.attachments.face
+    if (
+      !anchor ||
+      !pose?.frames.every(({ drawOrder }) => drawOrder.includes('face')) ||
+      Math.abs(face.offsetPx.x + face.originPx.x - anchor.x) > 0.001 ||
+      Math.abs(face.offsetPx.y + face.originPx.y - anchor.y) > 0.001
+    ) {
+      fail('INVALID_REFERENCE', face01SpriteId, 'Expected the face origin and slot to match the Beginner Idle pose')
+    }
+  }
   const required = [
     { id: visualIds.beginner, type: 'player', clips: beginnerStates },
     { id: visualIds.guide, type: 'npc', clips: ['idle'] },
@@ -259,13 +434,20 @@ function validateCoverage(atlases: readonly AssetAtlas[]) {
   }
 }
 
-export function buildAssetCatalog(input: unknown, root: string, development = false) {
+export function buildAssetCatalog(input: unknown, root: string, development = false, ...experimentalAtlases: unknown[]) {
   const manifest = record(input, 'manifest')
   if (manifest.schemaVersion !== 1) fail('INVALID_MANIFEST', 'schemaVersion', 'Expected schema version 1')
+  const definitions = [...list(manifest.atlases, 'atlases')]
+  const productionAtlasCount = definitions.length
+  for (const experimentalAtlas of experimentalAtlases) {
+    const extra = record(experimentalAtlas, 'experimental atlas manifest')
+    if (extra.schemaVersion !== 1) fail('INVALID_MANIFEST', 'experimental atlas schemaVersion', 'Expected schema version 1')
+    definitions.push(...list(extra.atlases, 'experimental atlases'))
+  }
   const ids = new Set<string>()
   const sources = new Set<string>()
   const files = new Map<string, Buffer>()
-  const entries = list(manifest.atlases, 'atlases')
+  const entries = definitions
     .map((input, i) => {
       const path = `atlases[${i}]`
       const value = record(input, path)
@@ -285,7 +467,13 @@ export function buildAssetCatalog(input: unknown, root: string, development = fa
       const credit = readRights(value.rights, root, `${path}.rights`)
       const sprites = list(value.sprites, `${path}.sprites`)
         .map((sprite, index) => {
-          const entry = readSprite(sprite, `${path}.sprites[${index}]`, width, height)
+          const entry = readSprite(sprite, `${path}.sprites[${index}]`, width, height, id)
+          if (entry.idlePose && (i < productionAtlasCount || value.optionalInDevelopment !== true || width !== 1536 || height !== 384)) {
+            fail('INVALID_MANIFEST', path, 'The Beginner Idle sheet must be a 1536 × 384 optional development atlas')
+          }
+          if (entry.attachedFace && (i < productionAtlasCount || value.optionalInDevelopment !== true || entry.type !== 'player')) {
+            fail('INVALID_MANIFEST', path, 'Face 01 must be an optional development player atlas')
+          }
           unique(ids, entry.id, path)
           return entry
         })
@@ -317,6 +505,49 @@ export function buildAssetCatalog(input: unknown, root: string, development = fa
 
 function digest(data: Buffer) {
   return createHash('sha256').update(data).digest('hex')
+}
+
+export function addExperimentalParallax(
+  assets: ReturnType<typeof buildAssetCatalog>,
+  input: unknown,
+  sourceRoot: string,
+  rightsRoot: string,
+  allowMissing: boolean
+) {
+  const manifest = record(input, 'experimental parallax manifest')
+  if (manifest.schemaVersion !== 1) fail('INVALID_MANIFEST', 'schemaVersion', 'Expected schema version 1')
+  const ids = new Set(assets.catalog.atlases.flatMap((atlas) => [atlas.id, ...atlas.sprites.map(({ id }) => id)]))
+  const sources = new Set<string>()
+  const credits: string[] = []
+  const images: TextureImageAsset[] = []
+  const credit = readRights(manifest.rights, rightsRoot, 'rights')
+  for (const [index, raw] of list(manifest.images, 'images').entries()) {
+    const path = `images[${index}]`
+    const value = record(raw, path)
+    const id = assetId(value.id, `${path}.id`)
+    unique(ids, id, path)
+    const source = localPath(value.source, `${path}.source`)
+    if (!source.endsWith('.png')) fail('INVALID_PATH', path, 'Expected a source PNG')
+    unique(sources, source, path)
+    if (typeof value.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.sha256)) fail('INVALID_MANIFEST', path, 'Expected SHA-256')
+    const width = integer(value.width, `${path}.width`, 1, 4096)
+    const height = integer(value.height, `${path}.height`, 1, 4096)
+    const bytes = readLocalFile(sourceRoot, source)
+    if (!bytes) {
+      if (!allowMissing) fail('MISSING_FILE', source, 'Missing parallax PNG')
+      continue
+    }
+    validatePng(bytes, width, height, source)
+    if (digest(bytes) !== value.sha256) fail('DIGEST_MISMATCH', source, 'Bytes do not match the reviewed manifest')
+    const output = `game-assets/${id}.${value.sha256.slice(0, 16)}.png`
+    assets.files.set(output, bytes)
+    images.push({ id, width, height, output })
+    credits.push(`[${id}]\n${credit}`)
+  }
+  if (credits.length) {
+    assets.files.set(attributionPath, Buffer.from(`${assets.files.get(attributionPath)?.toString() ?? ''}\n${credits.join('\n\n')}\n`))
+  }
+  return { catalog: { ...assets.catalog, experimentalParallax: images }, files: assets.files }
 }
 
 export function validateTiledAssetReferences(mapsRoot: string, mapFiles: readonly string[], assets: ReturnType<typeof buildAssetCatalog>) {

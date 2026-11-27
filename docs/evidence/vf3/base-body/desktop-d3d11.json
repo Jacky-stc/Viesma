@@ -1,0 +1,18 @@
+{
+  "chromium": "159.0.8154.6",
+  "renderer": "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics (0x0000A7A1) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  "viewport": {
+    "width": 1440,
+    "height": 1000,
+    "dpr": 1
+  },
+  "canvas": {
+    "width": 1118,
+    "height": 628
+  },
+  "seconds": 5.0001,
+  "samples": 300,
+  "fps": 59.99880002399953,
+  "p50Ms": 16.69999999999891,
+  "p95Ms": 16.899999999999636
+}

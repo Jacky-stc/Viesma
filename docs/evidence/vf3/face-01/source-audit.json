@@ -1,0 +1,54 @@
+{
+  "sourceSha256": "771c19f33dd188690b46bf78b810fc22ea75a7f3a65324477df2761f3b752dbe",
+  "sourceSize": [
+    1536,
+    1024
+  ],
+  "mode": "RGBA",
+  "alphaHistogram": {
+    "0-0": 1464840,
+    "1-15": 17030,
+    "16-63": 1965,
+    "64-127": 1376,
+    "128-254": 87653,
+    "255-255": 0
+  },
+  "maxAlpha": 254,
+  "allNonzeroBounds": [
+    33,
+    87,
+    1370,
+    1000
+  ],
+  "boundsAtAlpha16": [
+    424,
+    354,
+    1109,
+    768
+  ],
+  "supportedBounds": [
+    422,
+    352,
+    1111,
+    770
+  ],
+  "removedNonzeroPixels": 3667,
+  "maxRemovedAlpha": 30,
+  "normalizedBounds": [
+    128,
+    119,
+    202,
+    164
+  ],
+  "sourceScale": 0.108,
+  "placementFromSourceOriginPx": [
+    5,
+    -3
+  ],
+  "normalizedPixelsOutsideBodyAlpha250ByFrame": [
+    0,
+    0,
+    0,
+    0
+  ]
+}

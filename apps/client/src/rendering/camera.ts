@@ -16,8 +16,12 @@ function followAxis(target: number, worldStart: number, worldLength: number, vis
   return Math.max(worldStart, Math.min(target - visibleLength / 2, worldStart + worldLength - visibleLength))
 }
 
+export function viewportScale(viewport: ViewportSize) {
+  return Math.min(viewport.width / 1280, viewport.height / 720)
+}
+
 export function followCamera(target: WorldPoint, bounds: Aabb, viewport: ViewportSize): CameraView {
-  const scale = Math.min(viewport.width / 1280, viewport.height / 720)
+  const scale = viewportScale(viewport)
   return {
     scale,
     origin: {

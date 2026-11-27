@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "rights": {
+    "kind": "original",
+    "license": "project-owned",
+    "creator": "Viesma 專案擁有者",
+    "attribution": "Viesma · Forest Entrance",
+    "evidence": "provenance/forest-entrance.md"
+  },
+  "images": [
+    {
+      "id": "forest-sky",
+      "source": "forest-entrance/forest-sky.png",
+      "width": 2172,
+      "height": 724,
+      "sha256": "0b5ca7f7dd187b9443cd75cb3b79763b129f0c86538247d32c7ad85af0164c93"
+    },
+    {
+      "id": "forest-ruins",
+      "source": "forest-entrance/forest-ruins.png",
+      "width": 2172,
+      "height": 724,
+      "sha256": "57d38e765a2c471b923cb95ac9dae40c8b114f44ac5fed21aebd4826080bbb5d"
+    },
+    {
+      "id": "forest-far-trees",
+      "source": "forest-entrance/forest-far-trees.png",
+      "width": 2172,
+      "height": 724,
+      "sha256": "009079eede17f59fe04920e208b295a221843ae08fa4757b52750a0104cca3c5"
+    },
+    {
+      "id": "forest-near-trees",
+      "source": "forest-entrance/forest-near-trees.png",
+      "width": 2172,
+      "height": 724,
+      "sha256": "90f9ba01d204f0b1a3f998c57dd1493749c13c97661b0ef2e50597bcdb25cbde"
+    },
+    {
+      "id": "forest-foreground",
+      "source": "forest-entrance/forest-foreground.png",
+      "width": 2172,
+      "height": 724,
+      "sha256": "11a0f965f085ba5b24b00cf87299c230577afae2c8a8eeea61433a987c2ebba0"
+    }
+  ]
+}

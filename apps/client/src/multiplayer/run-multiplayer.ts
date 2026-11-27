@@ -60,6 +60,7 @@ import {
   type PlayerControllerState,
 } from '@viesma/simulation'
 import { attachBrowserInput } from '../input/browser-input'
+import type { CharacterPreviewRef } from '../rendering/character-preview'
 import { createWorldRenderer } from '../rendering/world-renderer'
 import { createCombatPresentation } from './combat-presentation'
 import { createCorrectionPresentation } from './correction-presentation'
@@ -199,7 +200,8 @@ export async function runMultiplayer(
   disconnect: () => void,
   toggleApPanel: () => void,
   toggleInventory: () => void,
-  signal: AbortSignal
+  signal: AbortSignal,
+  characterPreview?: CharacterPreviewRef
 ): Promise<void> {
   if (signal.aborted) return
   const document = host.ownerDocument
@@ -219,7 +221,7 @@ export async function runMultiplayer(
     host,
     { width: initialPhysicsBalance.bodyWidthWorldUnits, height: initialPhysicsBalance.bodyHeightWorldUnits },
     signal,
-    diagnostics
+    { diagnostics, characterPreview }
   )
   if (!renderer || signal.aborted) return
 

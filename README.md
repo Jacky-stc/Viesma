@@ -101,6 +101,16 @@ pnpm run test:smoke
 
 Chromium 測試可使用 SwiftShader，預設連接埠為 4173 和 2567。若 2567 已有開發伺服器，PowerShell 可在同一個終端設定 `$env:VIESMA_SERVER_PORT = '25822'` 再執行 smoke。CI 或缺瀏覽器系統套件的 Linux 可用 `pnpm exec playwright install --with-deps chromium` 安裝 Chromium 和系統套件。Windows 驗證結果與負載限制見 [Pre-M3.4 維護紀錄](docs/evidence/CI-STABILIZATION.md#pre-m34-維護)。
 
+### Visual Foundation 瀏覽器驗證
+
+使用專案指定版本的 Node.js 與 pnpm，安裝 workspace 依賴及 Playwright Chromium 後，可從 repository 根目錄執行下列指令。
+
+```powershell
+pnpm run test:visual --reporter=line
+```
+
+這個入口會先建置 shared packages 與 server，再啟動 Playwright。可直接在已安裝依賴、尚無 `dist/` 的工作目錄執行。需要指定開發連接埠時，先設定 `$env:VIESMA_PARALLAX_PORT`。預設使用 SwiftShader，Windows 可設定 `$env:VIESMA_PARALLAX_HARDWARE = '1'` 驗證 ANGLE Direct3D11。
+
 ### M1 多人測試
 
 使用 `pnpm dev` 啟動 client 與本機 server。以兩個分頁開啟 Vite 網址，將場景模式切到「多人測試」。點選場景取得焦點後，以 ←／→ 或 A／D 移動、Space 跳躍。兩端的「同房角色數」會更新。切換模式或卸載場景就會離開房間。

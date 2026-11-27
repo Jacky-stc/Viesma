@@ -1,0 +1,1419 @@
+[
+  {
+    "step": "idle",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "right",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  },
+  {
+    "step": "idle",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "right",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  },
+  {
+    "step": "tap-ArrowLeft",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "right",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  },
+  {
+    "step": "tap-ArrowLeft",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "right",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  },
+  {
+    "step": "tap-ArrowLeft",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "released",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "released",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "released",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "released",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "left",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  },
+  {
+    "step": "tap-ArrowRight",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "left",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  },
+  {
+    "step": "tap-ArrowRight",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "right",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "tap-ArrowRight",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "right",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "released",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "right",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "released",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "right",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "released",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "right",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "released",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "right",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  },
+  {
+    "step": "held-left",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "right",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  },
+  {
+    "step": "held-left",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "held-left",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "held-left",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "held-left",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "held-left",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "held-left",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "held-left",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "held-left",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "held-left",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "held-left",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "held-left",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "alternating-ArrowRight",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "alternating-ArrowRight",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "right",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "alternating-ArrowLeft",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "right",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "alternating-ArrowLeft",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "alternating-ArrowRight",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "alternating-ArrowRight",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "right",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "alternating-ArrowLeft",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "right",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "alternating-ArrowLeft",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "stopped",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "stopped",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "stopped",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "run",
+      "facing": "left",
+      "pose": "single-sprite",
+      "frameIndex": null,
+      "faceVisible": false,
+      "order": null,
+      "attachments": null
+    },
+    "remote": []
+  },
+  {
+    "step": "stopped",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "left",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  },
+  {
+    "step": "stopped",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "left",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  },
+  {
+    "step": "stopped",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "left",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  },
+  {
+    "step": "stopped",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "left",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  },
+  {
+    "step": "stopped",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "left",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  },
+  {
+    "step": "stopped",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "left",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  },
+  {
+    "step": "stopped",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "left",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  },
+  {
+    "step": "stopped",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "left",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  },
+  {
+    "step": "stopped",
+    "mode": "paper-doll",
+    "faceTextureAvailable": true,
+    "local": {
+      "renderState": "idle",
+      "facing": "left",
+      "pose": "idle",
+      "frameIndex": 0,
+      "faceVisible": true,
+      "order": "baseBody → face",
+      "attachments": {
+        "head": {
+          "x": 196.2,
+          "y": 126.78,
+          "rotationDeg": 0
+        },
+        "face": {
+          "x": 151.99,
+          "y": 157.29,
+          "rotationDeg": 0
+        },
+        "torso": {
+          "x": 190.89,
+          "y": 233.78,
+          "rotationDeg": 0
+        },
+        "mainHand": {
+          "x": 226.71,
+          "y": 257.22,
+          "rotationDeg": 61
+        },
+        "offHand": {
+          "x": 159.5,
+          "y": 257.22,
+          "rotationDeg": 129
+        },
+        "foot": {
+          "x": 192,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "nearSole": {
+          "x": 213.44,
+          "y": 320,
+          "rotationDeg": 0
+        },
+        "farSole": {
+          "x": 168.79,
+          "y": 320,
+          "rotationDeg": 0
+        }
+      }
+    },
+    "remote": []
+  }
+]

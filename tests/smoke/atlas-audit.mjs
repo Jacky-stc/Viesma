@@ -1,10 +1,10 @@
-export async function installAtlasAudit(page) {
-  await page.addInitScript(() => {
+export async function installAtlasAudit(page, extraDimensions = {}) {
+  await page.addInitScript((extraDimensions) => {
     const create = globalThis.createImageBitmap
     const close = globalThis.ImageBitmap.prototype.close
     const bitmaps = new Map()
     const textures = new Map()
-    const dimensions = { '192x168': 'beginner', '64x48': 'village', '128x32': 'field' }
+    const dimensions = { '192x168': 'beginner', '64x48': 'village', '128x32': 'field', ...extraDimensions }
     globalThis.createImageBitmap = async (...args) => {
       const bitmap = await create(...args)
       const atlas = args[0] instanceof globalThis.Blob && args[0].type === 'image/png' && dimensions[bitmap.width + 'x' + bitmap.height]
@@ -41,7 +41,7 @@ export async function installAtlasAudit(page) {
       bitmaps: [...bitmaps.values()].sort(),
       textures: [...textures.values()].sort(),
     })
-  })
+  }, extraDimensions)
 }
 
 export function readAtlasAudit(page) {

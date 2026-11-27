@@ -1,0 +1,605 @@
+{
+  "schemaVersion": 1,
+  "atlases": [
+    {
+      "id": "beginner-static-atlas",
+      "type": "atlas",
+      "source": "images/beginner-static.png",
+      "output": "game-assets/beginner-static-atlas.png",
+      "sha256": "081e71fe24bd2f56ba68e6fe3813cafcd8d2d2bf7423cadf614e4f513d8c4715",
+      "width": 180,
+      "height": 256,
+      "optionalInDevelopment": true,
+      "rights": {
+        "kind": "original",
+        "creator": "Viesma",
+        "license": "project-owned",
+        "attribution": "Viesma · Beginner",
+        "evidence": "provenance/beginner-character.md",
+        "generator": "derive-beginner-character.py"
+      },
+      "sprites": [
+        {
+          "id": "beginner-static",
+          "type": "player",
+          "renderWidth": 45,
+          "renderHeight": 64,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 0,
+                  "y": 0,
+                  "width": 180,
+                  "height": 256
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "beginner-base-body-atlas",
+      "type": "atlas",
+      "source": "images/beginner-base-body.png",
+      "output": "game-assets/beginner-base-body-atlas.png",
+      "sha256": "081e71fe24bd2f56ba68e6fe3813cafcd8d2d2bf7423cadf614e4f513d8c4715",
+      "width": 180,
+      "height": 256,
+      "optionalInDevelopment": true,
+      "rights": {
+        "kind": "original",
+        "creator": "Viesma",
+        "license": "project-owned",
+        "attribution": "Viesma · Beginner",
+        "evidence": "provenance/beginner-character.md",
+        "generator": "derive-beginner-character.py"
+      },
+      "sprites": [
+        {
+          "id": "beginner-base-body",
+          "type": "player",
+          "renderWidth": 56,
+          "renderHeight": 80,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 0,
+                  "y": 0,
+                  "width": 180,
+                  "height": 256
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "beginner-base-body-idle-atlas",
+      "type": "atlas",
+      "source": "images/beginner-base-body-idle.png",
+      "output": "game-assets/beginner-base-body-idle-atlas.png",
+      "sha256": "65b15865a21b13553401dbb1121f8bee628edbe887e7de9e512b9ab23d19aa4c",
+      "width": 1536,
+      "height": 384,
+      "optionalInDevelopment": true,
+      "rights": {
+        "kind": "original",
+        "creator": "Viesma",
+        "license": "project-owned",
+        "attribution": "Viesma · Beginner",
+        "evidence": "provenance/beginner-character.md",
+        "generator": "derive-beginner-character.py"
+      },
+      "sprites": [
+        {
+          "id": "beginner-base-body-idle",
+          "type": "player",
+          "renderWidth": 115,
+          "renderHeight": 115,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 8,
+                  "y": 8,
+                  "width": 368,
+                  "height": 368
+                },
+                {
+                  "x": 392,
+                  "y": 8,
+                  "width": 368,
+                  "height": 368
+                },
+                {
+                  "x": 776,
+                  "y": 8,
+                  "width": 368,
+                  "height": 368
+                },
+                {
+                  "x": 1160,
+                  "y": 8,
+                  "width": 368,
+                  "height": 368
+                }
+              ],
+              "ticksPerFrame": 6,
+              "loop": true
+            }
+          },
+          "idlePose": {
+            "schemaVersion": 1,
+            "poseSetId": "beginner",
+            "poseVersion": 1,
+            "sourceFacing": "left",
+            "originalSizePx": {
+              "width": 384,
+              "height": 384
+            },
+            "pivotPx": {
+              "x": 192,
+              "y": 320
+            },
+            "worldUnitsPerPixel": 0.3125,
+            "clips": {
+              "idle": {
+                "loop": true,
+                "frames": [
+                  {
+                    "index": 0,
+                    "durationTicks": 6,
+                    "attachments": {
+                      "head": {
+                        "x": 196.2,
+                        "y": 126.78,
+                        "rotationDeg": 0
+                      },
+                      "face": {
+                        "x": 151.99,
+                        "y": 157.29,
+                        "rotationDeg": 0
+                      },
+                      "torso": {
+                        "x": 190.89,
+                        "y": 233.78,
+                        "rotationDeg": 0
+                      },
+                      "mainHand": {
+                        "x": 226.71,
+                        "y": 257.22,
+                        "rotationDeg": 61
+                      },
+                      "offHand": {
+                        "x": 159.5,
+                        "y": 257.22,
+                        "rotationDeg": 129
+                      },
+                      "foot": {
+                        "x": 192,
+                        "y": 320,
+                        "rotationDeg": 0
+                      },
+                      "nearSole": {
+                        "x": 213.44,
+                        "y": 320,
+                        "rotationDeg": 0
+                      },
+                      "farSole": {
+                        "x": 168.79,
+                        "y": 320,
+                        "rotationDeg": 0
+                      }
+                    },
+                    "drawOrder": [
+                      "accessoryBack",
+                      "backHair",
+                      "weaponBack",
+                      "baseBody",
+                      "lowerClothing",
+                      "shoes",
+                      "upperClothing",
+                      "face",
+                      "frontHair",
+                      "upperClothingFront",
+                      "weaponFront",
+                      "bodyForeground",
+                      "accessoryFront"
+                    ],
+                    "layers": {
+                      "baseBody": {
+                        "atlasId": "beginner-base-body-idle-atlas",
+                        "rectPx": {
+                          "x": 8,
+                          "y": 8,
+                          "width": 368,
+                          "height": 368
+                        },
+                        "offsetPx": {
+                          "x": 8,
+                          "y": 8
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "index": 1,
+                    "durationTicks": 6,
+                    "attachments": {
+                      "head": {
+                        "x": 196.2,
+                        "y": 125.78,
+                        "rotationDeg": 0
+                      },
+                      "face": {
+                        "x": 151.99,
+                        "y": 156.29,
+                        "rotationDeg": 0
+                      },
+                      "torso": {
+                        "x": 190.89,
+                        "y": 232.78,
+                        "rotationDeg": 0
+                      },
+                      "mainHand": {
+                        "x": 226.71,
+                        "y": 256.22,
+                        "rotationDeg": 61
+                      },
+                      "offHand": {
+                        "x": 159.5,
+                        "y": 256.22,
+                        "rotationDeg": 129
+                      },
+                      "foot": {
+                        "x": 192,
+                        "y": 320,
+                        "rotationDeg": 0
+                      },
+                      "nearSole": {
+                        "x": 213.44,
+                        "y": 320,
+                        "rotationDeg": 0
+                      },
+                      "farSole": {
+                        "x": 168.79,
+                        "y": 320,
+                        "rotationDeg": 0
+                      }
+                    },
+                    "drawOrder": [
+                      "accessoryBack",
+                      "backHair",
+                      "weaponBack",
+                      "baseBody",
+                      "lowerClothing",
+                      "shoes",
+                      "upperClothing",
+                      "face",
+                      "frontHair",
+                      "upperClothingFront",
+                      "weaponFront",
+                      "bodyForeground",
+                      "accessoryFront"
+                    ],
+                    "layers": {
+                      "baseBody": {
+                        "atlasId": "beginner-base-body-idle-atlas",
+                        "rectPx": {
+                          "x": 392,
+                          "y": 8,
+                          "width": 368,
+                          "height": 368
+                        },
+                        "offsetPx": {
+                          "x": 8,
+                          "y": 8
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "index": 2,
+                    "durationTicks": 6,
+                    "attachments": {
+                      "head": {
+                        "x": 196.2,
+                        "y": 123.78,
+                        "rotationDeg": 0
+                      },
+                      "face": {
+                        "x": 151.99,
+                        "y": 154.29,
+                        "rotationDeg": 0
+                      },
+                      "torso": {
+                        "x": 190.89,
+                        "y": 230.78,
+                        "rotationDeg": 0
+                      },
+                      "mainHand": {
+                        "x": 226.71,
+                        "y": 254.22,
+                        "rotationDeg": 61
+                      },
+                      "offHand": {
+                        "x": 159.5,
+                        "y": 254.22,
+                        "rotationDeg": 129
+                      },
+                      "foot": {
+                        "x": 192,
+                        "y": 320,
+                        "rotationDeg": 0
+                      },
+                      "nearSole": {
+                        "x": 213.44,
+                        "y": 320,
+                        "rotationDeg": 0
+                      },
+                      "farSole": {
+                        "x": 168.79,
+                        "y": 320,
+                        "rotationDeg": 0
+                      }
+                    },
+                    "drawOrder": [
+                      "accessoryBack",
+                      "backHair",
+                      "weaponBack",
+                      "baseBody",
+                      "lowerClothing",
+                      "shoes",
+                      "upperClothing",
+                      "face",
+                      "frontHair",
+                      "upperClothingFront",
+                      "weaponFront",
+                      "bodyForeground",
+                      "accessoryFront"
+                    ],
+                    "layers": {
+                      "baseBody": {
+                        "atlasId": "beginner-base-body-idle-atlas",
+                        "rectPx": {
+                          "x": 776,
+                          "y": 8,
+                          "width": 368,
+                          "height": 368
+                        },
+                        "offsetPx": {
+                          "x": 8,
+                          "y": 8
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "index": 3,
+                    "durationTicks": 6,
+                    "attachments": {
+                      "head": {
+                        "x": 196.2,
+                        "y": 125.78,
+                        "rotationDeg": 0
+                      },
+                      "face": {
+                        "x": 151.99,
+                        "y": 156.29,
+                        "rotationDeg": 0
+                      },
+                      "torso": {
+                        "x": 190.89,
+                        "y": 232.78,
+                        "rotationDeg": 0
+                      },
+                      "mainHand": {
+                        "x": 226.71,
+                        "y": 256.22,
+                        "rotationDeg": 61
+                      },
+                      "offHand": {
+                        "x": 159.5,
+                        "y": 256.22,
+                        "rotationDeg": 129
+                      },
+                      "foot": {
+                        "x": 192,
+                        "y": 320,
+                        "rotationDeg": 0
+                      },
+                      "nearSole": {
+                        "x": 213.44,
+                        "y": 320,
+                        "rotationDeg": 0
+                      },
+                      "farSole": {
+                        "x": 168.79,
+                        "y": 320,
+                        "rotationDeg": 0
+                      }
+                    },
+                    "drawOrder": [
+                      "accessoryBack",
+                      "backHair",
+                      "weaponBack",
+                      "baseBody",
+                      "lowerClothing",
+                      "shoes",
+                      "upperClothing",
+                      "face",
+                      "frontHair",
+                      "upperClothingFront",
+                      "weaponFront",
+                      "bodyForeground",
+                      "accessoryFront"
+                    ],
+                    "layers": {
+                      "baseBody": {
+                        "atlasId": "beginner-base-body-idle-atlas",
+                        "rectPx": {
+                          "x": 1160,
+                          "y": 8,
+                          "width": 368,
+                          "height": 368
+                        },
+                        "offsetPx": {
+                          "x": 8,
+                          "y": 8
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "beginner-paper-doll-diagnostics-atlas",
+      "type": "atlas",
+      "source": "images/beginner-paper-doll-diagnostics.png",
+      "output": "game-assets/beginner-paper-doll-diagnostics-atlas.png",
+      "sha256": "67ad2657ec9f224da2f8e0ab88b6f46e64b9c81ea569aeab381469f27223582d",
+      "width": 272,
+      "height": 100,
+      "optionalInDevelopment": true,
+      "rights": {
+        "kind": "original",
+        "creator": "Viesma",
+        "license": "project-owned",
+        "attribution": "Viesma · Beginner Paper Doll development diagnostics",
+        "evidence": "provenance/beginner-character.md"
+      },
+      "sprites": [
+        {
+          "id": "beginner-diagnostic-back",
+          "type": "player",
+          "renderWidth": 132,
+          "renderHeight": 62,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 4,
+                  "y": 4,
+                  "width": 132,
+                  "height": 62
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            }
+          }
+        },
+        {
+          "id": "beginner-diagnostic-face",
+          "type": "player",
+          "renderWidth": 31,
+          "renderHeight": 19,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 144,
+                  "y": 4,
+                  "width": 31,
+                  "height": 19
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            }
+          }
+        },
+        {
+          "id": "beginner-diagnostic-front",
+          "type": "player",
+          "renderWidth": 84,
+          "renderHeight": 90,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 184,
+                  "y": 4,
+                  "width": 84,
+                  "height": 90
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "beginner-face-01-atlas",
+      "type": "atlas",
+      "source": "images/beginner-face-01.png",
+      "output": "game-assets/beginner-face-01-atlas.png",
+      "sha256": "59f3c68991b846af0f950924677c16e527da54f11db865efeb176d338361a333",
+      "width": 82,
+      "height": 53,
+      "optionalInDevelopment": true,
+      "rights": {
+        "kind": "original",
+        "creator": "Viesma",
+        "license": "project-owned",
+        "attribution": "Viesma · Beginner Face 01",
+        "evidence": "provenance/beginner-character.md",
+        "generator": "derive-beginner-character.py"
+      },
+      "sprites": [
+        {
+          "id": "beginner-face-01",
+          "type": "player",
+          "renderWidth": 23,
+          "renderHeight": 14,
+          "clips": {
+            "idle": {
+              "frames": [
+                {
+                  "x": 4,
+                  "y": 4,
+                  "width": 74,
+                  "height": 45
+                }
+              ],
+              "ticksPerFrame": 1,
+              "loop": false
+            }
+          },
+          "attachedFace": {
+            "poseSetId": "beginner",
+            "poseVersion": 1,
+            "defaultCalibration": {
+              "xPx": 5.5,
+              "yPx": 27.5,
+              "scale": 1.3
+            },
+            "offsetPx": {
+              "x": 128,
+              "y": 119
+            },
+            "originPx": {
+              "x": 23.99,
+              "y": 38.29
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
